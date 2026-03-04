@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://discount-engine.local/schemas/hvac-bundle-catalog.schema.json",
+  "title": "HVAC Bundle Catalog",
+  "type": "object",
+  "required": [
+    "version",
+    "generatedAt",
+    "sources",
+    "stats",
+    "brands",
+    "combos"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sources": {
+      "type": "object",
+      "required": [
+        "sheet23",
+        "sheet22",
+        "units"
+      ],
+      "properties": {
+        "sheet23": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sheet22": {
+          "type": "string",
+          "minLength": 1
+        },
+        "units": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "stats": {
+      "type": "object",
+      "required": [
+        "combos",
+        "brands",
+        "indoorRows",
+        "sourceRows",
+        "zones",
+        "brandZoneBounds"
+      ],
+      "properties": {
+        "combos": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "brands": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "indoorRows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sourceRows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "zones": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "uniqueItems": true
+        },
+        "brandZoneBounds": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "min",
+              "max"
+            ],
+            "properties": {
+              "min": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "max": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "brands": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "combos": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "comboId",
+          "brand",
+          "tier",
+          "refrigerant",
+          "zones",
+          "indoorBtuMultiset",
+          "indoorSlots",
+          "outdoor",
+          "stackGroup"
+        ],
+        "properties": {
+          "comboId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "brand": {
+            "type": "string",
+            "minLength": 1
+          },
+          "tier": {
+            "type": "string"
+          },
+          "refrigerant": {
+            "type": "string"
+          },
+          "zones": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "indoorBtuMultiset": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "minItems": 1
+          },
+          "indoorSlots": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "btu",
+                "candidateSkus"
+              ],
+              "properties": {
+                "btu": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "candidateSkus": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "minItems": 0
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "outdoor": {
+            "type": "object",
+            "required": [
+              "sku",
+              "productId",
+              "url"
+            ],
+            "properties": {
+              "sku": {
+                "type": "string",
+                "minLength": 1
+              },
+              "productId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "stackGroup": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

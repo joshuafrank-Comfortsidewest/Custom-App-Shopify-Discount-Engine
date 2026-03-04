@@ -1,0 +1,27 @@
+api_version = "2026-01"
+
+[[extensions]]
+name = "t:name"
+handle = "smart-discount-engine-core"
+type = "function"
+uid = "981e14b2-79e4-d775-c2f3-3e96ff777ad012d521ad"
+description = "t:description"
+
+  [[extensions.targeting]]
+  target = "cart.lines.discounts.generate.run"
+  input_query = "src/cart_lines_discounts_generate_run.graphql"
+  export = "cart_lines_discounts_generate_run"
+
+  [[extensions.targeting]]
+  target = "cart.delivery-options.discounts.generate.run"
+  input_query = "src/cart_delivery_options_discounts_generate_run.graphql"
+  export = "cart_delivery_options_discounts_generate_run"
+
+  [extensions.ui.paths]
+  create = "/app/discounts/new"
+  details = "/app/discounts/:id"
+
+  [extensions.build]
+  command = "cargo build --target=wasm32-unknown-unknown --release"
+  path = "target/wasm32-unknown-unknown/release/smart-discount-engine-core.wasm"
+  watch = [ "src/**/*.rs" ]

@@ -1,0 +1,10 @@
+﻿<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Stacked SDE logo">
+  <rect x="32" y="32" width="448" height="448" rx="96" fill="#f3f4f6"/>
+  <rect x="96" y="120" width="320" height="272" rx="32" fill="#111827"/>
+  <rect x="126" y="150" width="90" height="212" rx="20" fill="#22c55e"/>
+  <rect x="211" y="150" width="90" height="212" rx="20" fill="#f59e0b"/>
+  <rect x="296" y="150" width="90" height="212" rx="20" fill="#3b82f6"/>
+  <text x="171" y="281" text-anchor="middle" font-family="Arial, sans-serif" font-size="74" font-weight="800" fill="#111827">S</text>
+  <text x="256" y="281" text-anchor="middle" font-family="Arial, sans-serif" font-size="74" font-weight="800" fill="#111827">D</text>
+  <text x="341" y="281" text-anchor="middle" font-family="Arial, sans-serif" font-size="74" font-weight="800" fill="#111827">E</text>
+</svg>

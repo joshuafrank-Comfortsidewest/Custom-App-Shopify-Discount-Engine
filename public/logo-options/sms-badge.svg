@@ -1,0 +1,6 @@
+﻿<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="SMS Badge logo">
+  <rect x="32" y="32" width="448" height="448" rx="96" fill="#1d4ed8"/>
+  <rect x="104" y="126" width="304" height="224" rx="40" fill="#eff6ff"/>
+  <path d="M168 350l42-50h198" stroke="#eff6ff" stroke-width="30" stroke-linecap="round"/>
+  <text x="256" y="268" text-anchor="middle" font-family="Arial, sans-serif" font-size="116" font-weight="800" fill="#1d4ed8">%</text>
+</svg>

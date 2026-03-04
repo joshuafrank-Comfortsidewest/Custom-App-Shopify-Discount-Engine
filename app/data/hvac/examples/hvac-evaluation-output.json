@@ -1,0 +1,66 @@
+{
+  "generatedAt": "2026-02-28T06:19:04.213Z",
+  "summary": {
+    "cartLines": 4,
+    "candidateApplications": 1,
+    "selectedApplications": 1,
+    "estimatedTotalDiscount": 200
+  },
+  "selectedApplications": [
+    {
+      "ruleId": "cooper-hunter-outdoor-amount",
+      "ruleName": "Cooper and Hunter outdoor amount off",
+      "comboId": "combo_1",
+      "comboRef": {
+        "brand": "Cooper&Hunter",
+        "tier": "Standard",
+        "zones": 2,
+        "refrigerant": "R454B",
+        "outdoorSku": "CH-R18MES-230VO",
+        "stackGroup": "Cooper&Hunter:Standard:2"
+      },
+      "stackMode": "stackable",
+      "stackGroup": "Cooper&Hunter:Standard:2",
+      "bundlesMatched": 1,
+      "bundlesDiscounted": 1,
+      "subtotalCovered": 2640,
+      "estimatedDiscount": 200,
+      "discountConfig": {
+        "mode": "fixed_amount_off_component",
+        "amountOff": 200,
+        "amountTarget": "outdoor",
+        "maxApplicationsPerCart": 1
+      },
+      "candidateId": 1
+    }
+  ],
+  "rejectedApplications": [],
+  "allCandidates": [
+    {
+      "ruleId": "cooper-hunter-outdoor-amount",
+      "ruleName": "Cooper and Hunter outdoor amount off",
+      "comboId": "combo_1",
+      "comboRef": {
+        "brand": "Cooper&Hunter",
+        "tier": "Standard",
+        "zones": 2,
+        "refrigerant": "R454B",
+        "outdoorSku": "CH-R18MES-230VO",
+        "stackGroup": "Cooper&Hunter:Standard:2"
+      },
+      "stackMode": "stackable",
+      "stackGroup": "Cooper&Hunter:Standard:2",
+      "bundlesMatched": 1,
+      "bundlesDiscounted": 1,
+      "subtotalCovered": 2640,
+      "estimatedDiscount": 200,
+      "discountConfig": {
+        "mode": "fixed_amount_off_component",
+        "amountOff": 200,
+        "amountTarget": "outdoor",
+        "maxApplicationsPerCart": 1
+      },
+      "candidateId": 1
+    }
+  ]
+}

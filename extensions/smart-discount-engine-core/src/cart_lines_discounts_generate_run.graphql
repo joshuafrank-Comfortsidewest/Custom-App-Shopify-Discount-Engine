@@ -1,0 +1,81 @@
+query Input {
+  enteredDiscountCodes {
+    code
+  }
+  triggeringDiscountCode
+  cart {
+    buyerIdentity {
+      customer {
+        numberOfOrders
+        hasTags(
+          tags: [
+            "VIP15"
+            "VIP14"
+            "VIP13"
+            "VIP12"
+            "VIP11"
+            "VIP10"
+            "VIP9"
+            "VIP8"
+            "VIP7"
+            "VIP6"
+            "VIP5"
+            "VIP4"
+            "VIP3"
+          ]
+        ) {
+          tag
+          hasTag
+        }
+      }
+    }
+    cost {
+      subtotalAmount {
+        amount
+      }
+    }
+    lines {
+      id
+      quantity
+      cost {
+        subtotalAmount {
+          amount
+        }
+      }
+      merchandise {
+        __typename
+        ... on ProductVariant {
+          product {
+            id
+            hasTags(
+              tags: [
+                "15 off"
+                "14 off"
+                "13 off"
+                "12 off"
+                "11 off"
+                "10 off"
+                "9 off"
+                "8 off"
+                "7 off"
+                "6 off"
+                "5 off"
+                "4 off"
+                "3 off"
+              ]
+            ) {
+              tag
+              hasTag
+            }
+          }
+        }
+      }
+    }
+  }
+  discount {
+    discountClasses
+    appFunctionConfigMetafield: metafield(namespace: "$app", key: "function-configuration") {
+      value
+    }
+  }
+}

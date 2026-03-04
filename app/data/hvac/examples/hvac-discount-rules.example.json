@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "ruleId": "mr-diy-5-zone-percent",
+      "name": "MRCOOL DIY 5+ zones percent",
+      "enabled": true,
+      "stackMode": "exclusive_group",
+      "stackGroup": "mrcool-diy-zone-offers",
+      "when": {
+        "brands": [
+          "MRCOOL (DIY)"
+        ],
+        "zoneMin": 5,
+        "minBundles": 1
+      },
+      "discount": {
+        "mode": "percent_off",
+        "percentOff": 7.5,
+        "maxApplicationsPerCart": 2
+      }
+    },
+    {
+      "ruleId": "cooper-hunter-outdoor-amount",
+      "name": "Cooper and Hunter outdoor amount off",
+      "enabled": true,
+      "stackMode": "stackable",
+      "when": {
+        "brands": [
+          "Cooper&Hunter"
+        ],
+        "zoneMin": 2,
+        "zoneMax": 4,
+        "minBundles": 1
+      },
+      "discount": {
+        "mode": "fixed_amount_off_component",
+        "amountOff": 200,
+        "amountTarget": "outdoor",
+        "maxApplicationsPerCart": 1
+      }
+    },
+    {
+      "ruleId": "olmo-combined-global",
+      "name": "Olmo combined promo global exclusive",
+      "enabled": true,
+      "stackMode": "exclusive_global",
+      "when": {
+        "brands": [
+          "Olmo"
+        ],
+        "zoneMin": 3,
+        "minBundles": 1
+      },
+      "discount": {
+        "mode": "combined",
+        "percentOff": 4,
+        "amountOff": 120,
+        "amountTarget": "outdoor_or_indoor_highest",
+        "maxApplicationsPerCart": 3
+      }
+    }
+  ]
+}

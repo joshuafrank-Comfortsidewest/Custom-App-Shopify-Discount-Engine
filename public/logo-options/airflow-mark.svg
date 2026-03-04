@@ -1,0 +1,13 @@
+﻿<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Airflow Mark logo">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#334155"/>
+    </linearGradient>
+  </defs>
+  <rect x="32" y="32" width="448" height="448" rx="96" fill="url(#g)"/>
+  <path d="M132 184h190l58 58-132 132H132z" fill="#e2e8f0"/>
+  <path d="M162 214c34 0 34-26 68-26s34 26 68 26" fill="none" stroke="#0ea5e9" stroke-width="14" stroke-linecap="round"/>
+  <path d="M162 250c34 0 34-26 68-26s34 26 68 26" fill="none" stroke="#22d3ee" stroke-width="14" stroke-linecap="round"/>
+  <path d="M162 286c34 0 34-26 68-26s34 26 68 26" fill="none" stroke="#67e8f9" stroke-width="14" stroke-linecap="round"/>
+</svg>

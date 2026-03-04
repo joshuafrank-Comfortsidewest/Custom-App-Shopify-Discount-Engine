@@ -1,0 +1,1745 @@
+{
+  "version": 1,
+  "generatedAt": "2026-02-28T08:13:52.633Z",
+  "store": {
+    "shop": "discount-engine-dev.myshopify.com"
+  },
+  "sources": {
+    "from": "ui_mapping"
+  },
+  "stats": {
+    "totalSkus": 192,
+    "matched": 192,
+    "unmatched": 0
+  },
+  "entries": [
+    {
+      "sku": "ACIQ-06W-HH-MD",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460248846585",
+      "productId": "gid://shopify/Product/9275875262713",
+      "productHandle": "aciq-6-000-btu-wall-mounted-platinum-multi-zone-air-handler-w-wifi-r454b",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-09CC-HH-MC",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460247830777",
+      "productId": "gid://shopify/Product/9275874246905",
+      "productHandle": "aciq-9-000-btu-ceiling-cassette-mini-split-air-handler-r454b-aciq-09cc-hh-mc",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-09CD-HH-MC",
+      "matched": true,
+      "matchMode": "manual",
+      "variantId": "gid://shopify/ProductVariant/47460247568633",
+      "productId": "gid://shopify/Product/9275873984761",
+      "productHandle": "aciq-9-000-btu-quiet-comfort-concealed-duct-mini-split-air-handler-with-hyper-heat-r454b-aciq-09cd-hh-mc",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-09FM-HH-MD",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460248158457",
+      "productId": "gid://shopify/Product/9275874574585",
+      "productHandle": "aciq-9-000-btu-floor-or-ceiling-mounted-mini-split-air-handler-with-heat-pump-r454b-refrigerant-multi-zone-compatible-aciq-09fm-hh-md",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-09W-HH-MC",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460249993465",
+      "productId": "gid://shopify/Product/9275875918073",
+      "productHandle": "aciq-9-000-btu-wall-mounted-platinum-multi-zone-air-handler-w-wifi-r410a-aciq-09w-hh-mc",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-09W-HH-MD",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460248977657",
+      "productId": "gid://shopify/Product/9275875295481",
+      "productHandle": "aciq-9-000-btu-wall-mounted-platinum-multi-zone-w-wifi-r454b",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-12CC-HH-MC",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460247863545",
+      "productId": "gid://shopify/Product/9275874279673",
+      "productHandle": "aciq-12-000-btu-ceiling-cassette-mini-split-air-handler-r454b-aciq-12cc-hh-mc",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-12CD-HH-MB",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460249731321",
+      "productId": "gid://shopify/Product/9275875655929",
+      "productHandle": "aciq-12-000-btu-concealed-duct-mini-split-air-handler-r410a-aciq-12cd-hh-mb",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-12CD-HH-MC",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460247634169",
+      "productId": "gid://shopify/Product/9275874050297",
+      "productHandle": "aciq-12-000-btu-quiet-comfort-concealed-duct-mini-split-air-handler-r410a-aciq-12cd-hh-mb",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-12FM-HH-MB",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460249796857",
+      "productId": "gid://shopify/Product/9275875721465",
+      "productHandle": "aciq-12-000-btu-floor-mounted-mini-split-air-handler-r410a-aciq-12fm-hh-mb",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-12W-HH-MC",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460250190073",
+      "productId": "gid://shopify/Product/9275876016377",
+      "productHandle": "aciq-12-000-btu-wall-mounted-platinum-multi-zone-air-handler-w-wifi-r410a-aciq-12w-hh-mc",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-12W-HH-MD",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460249108729",
+      "productId": "gid://shopify/Product/9275875328249",
+      "productHandle": "aciq-12-000-btu-wall-mounted-platinum-multi-zone-w-wifi-r454b",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-18CC-HH-MC",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460247896313",
+      "productId": "gid://shopify/Product/9275874312441",
+      "productHandle": "aciq-18-000-btu-ceiling-cassette-mini-split-air-handler-r454b-aciq-18cc-hh-mc",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-18CD-HH-MC",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460247699705",
+      "productId": "gid://shopify/Product/9275874083065",
+      "productHandle": "aciq-18-000-btu-quiet-comfort-concealed-duct-mini-split-air-handler-aciq-18cd-hh-mc",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-18FM-HH-MB",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460249829625",
+      "productId": "gid://shopify/Product/9275875754233",
+      "productHandle": "aciq-18-000-btu-floor-or-ceiling-mounted-mini-split-air-handler-r410a-aciq-18fm-hh-mb",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-18FM-HH-MD",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460248191225",
+      "productId": "gid://shopify/Product/9275874607353",
+      "productHandle": "aciq-18-000-btu-floor-or-ceiling-mounted-mini-split-air-handler-with-heat-pump-r454b-refrigerant-multi-zone-compatible",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-18W-HH-MC",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460250321145",
+      "productId": "gid://shopify/Product/9275876049145",
+      "productHandle": "aciq-18-000-btu-wall-mounted-platinum-multi-zone-air-handler-w-wifi-r410a-aciq-18w-hh-mc",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-18W-HH-MD",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460249239801",
+      "productId": "gid://shopify/Product/9275875361017",
+      "productHandle": "aciq-18-000-btu-wall-mounted-platinum-multi-zone-w-wifi",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-18Z-HH-M3C",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460248387833",
+      "productId": "gid://shopify/Product/9275874803961",
+      "productHandle": "aciq-18-000-btu-1-5-ton-25-seer2-multi-zone-condenser-extreme-series-inverter-r454b-aciq-18z-hh-m3c",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-24CC-HH-MC",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460247929081",
+      "productId": "gid://shopify/Product/9275874345209",
+      "productHandle": "aciq-24-000-btu-ceiling-cassette-mini-split-air-handler-r454b-aciq-24cc-hh-mc",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-24CD-HH-MC",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460247732473",
+      "productId": "gid://shopify/Product/9275874148601",
+      "productHandle": "aciq-24-000-btu-quiet-comfort-concealed-duct-mini-split-air-handler-with-hyper-heat-r454b-aciq-24cd-hh-mc",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-24FM-HH-MB",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460249862393",
+      "productId": "gid://shopify/Product/9275875787001",
+      "productHandle": "aciq-24-000-btu-floor-or-ceiling-mounted-mini-split-air-handler-r410a-aciq-24fm-hh-mb",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-24W-HH-MC",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275876081913",
+      "productHandle": "aciq-24-000-btu-wall-mounted-platinum-multi-zone-air-handler-w-wifi-r410a-aciq-24w-hh-mc",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-24W-HH-MD",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460249403641",
+      "productId": "gid://shopify/Product/9275875426553",
+      "productHandle": "aciq-24-000-btu-wall-mounted-platinum-multi-zone-w-wifi-r454b",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-36CC-HH-MC",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460248027385",
+      "productId": "gid://shopify/Product/9275874443513",
+      "productHandle": "aciq-36-000-btu-ceiling-cassette-mini-split-air-handler-r454b-aciq-36cc-hh-mc",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-36CD-HH-MC",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460248092921",
+      "productId": "gid://shopify/Product/9275874509049",
+      "productHandle": "aciq-36-000-btu-concealed-duct-mini-split-air-handler-r454b-aciq-36cd-hh-mc",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-36FM-HH-MB",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460249927929",
+      "productId": "gid://shopify/Product/9275875852537",
+      "productHandle": "aciq-36-000-btu-floor-or-ceiling-mounted-mini-split-air-handler-r410a-aciq-36fm-hh-mb",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-36W-HH-MC",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460241867001",
+      "productId": "gid://shopify/Product/9275871232249",
+      "productHandle": "36-000-btu-aciq-platinum-multi-zone-air-handler-w-wifi-r410a",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-36Z-HH-M5C",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460248617209",
+      "productId": "gid://shopify/Product/9275875033337",
+      "productHandle": "aciq-36-000-btu-3-ton-23-seer2-aciq-multi-zone-condenser-extreme-series",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-48Z-HH-M6C",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460248715513",
+      "productId": "gid://shopify/Product/9275875131641",
+      "productHandle": "aciq-48-000-btu-4-ton-23-seer2-multi-zone-condenser-extreme-series",
+      "productUrl": null
+    },
+    {
+      "sku": "ACIQ-55Z-HH-M6C",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460240654585",
+      "productId": "gid://shopify/Product/9275870707961",
+      "productHandle": "aciq-55-000-btu-4-5-ton-22-2-seer2-multi-zone-condenser-extreme-series-r454b",
+      "productUrl": null
+    },
+    {
+      "sku": "ACiQ-06W-HH-MC",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460241735929",
+      "productId": "gid://shopify/Product/9275871199481",
+      "productHandle": "6-000-btu-aciq-platinum-multi-zone-air-handler-w-wifi-r410a-1",
+      "productUrl": null
+    },
+    {
+      "sku": "ACiQ-24FM-HH-MD",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460248781049",
+      "productId": "gid://shopify/Product/9275875197177",
+      "productHandle": "aciq-24-000-btu-floor-or-ceiling-mounted-mini-split-air-handler-with-heat-pump-r454b-refrigerant-multi-zone-compatible",
+      "productUrl": null
+    },
+    {
+      "sku": "ACiQ-27z-HH-M4C",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460248584441",
+      "productId": "gid://shopify/Product/9275875000569",
+      "productHandle": "aciq-27-000-2-25-ton-23-seer2-aciq-multi-zone-condenser-extreme-series",
+      "productUrl": null
+    },
+    {
+      "sku": "ACiQ-36Z-HH-M4B",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460250550521",
+      "productId": "gid://shopify/Product/9275876147449",
+      "productHandle": "aciq-3-ton-22-2-seer2-multi-zone-condenser-extreme-heat-series-r410a",
+      "productUrl": null
+    },
+    {
+      "sku": "BRV-M09CT-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275879031033",
+      "productHandle": "bravo-milano-ductless-mini-split-ac-heat-pump-9-000-btu-230v-ceiling-cassette-unit-inverter-heating-cooling",
+      "productUrl": null
+    },
+    {
+      "sku": "BRV-M09DT-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275879489785",
+      "productHandle": "bravo-milano-ducted-mini-split-ac-heat-pump-9000-btu-230v-seer2-24-slim-duct-unit-inverter-heating-cooling",
+      "productUrl": null
+    },
+    {
+      "sku": "BRV-M09FC-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275871297785",
+      "productHandle": "bravo-milano-ductless-mini-split-ac-heat-pump-9-000-btu-universal-floor-ceiling-230v-inverter",
+      "productUrl": null
+    },
+    {
+      "sku": "BRV-M09WM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275879129337",
+      "productHandle": "bravo-milano-9k-indoor-units",
+      "productUrl": null
+    },
+    {
+      "sku": "BRV-M12CT-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275879063801",
+      "productHandle": "bravo-milano-ductless-mini-split-ac-heat-pump-9-000-btu-230v-ceiling-cassette-unit-inverter-heating-cooling-copy",
+      "productUrl": null
+    },
+    {
+      "sku": "BRV-M12DT-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275879522553",
+      "productHandle": "bravo-milano-ducted-mini-split-ac-heat-pump-12000-btu-230v-seer2-24-slim-duct-unit-inverter-heating-cooling",
+      "productUrl": null
+    },
+    {
+      "sku": "BRV-M12FC-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275872575737",
+      "productHandle": "bravo-milano-12-000-btu-universal-floor-ceiling-ductless-mini-split-ac-heat-pump-230v-inverter",
+      "productUrl": null
+    },
+    {
+      "sku": "BRV-M12WM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275879162105",
+      "productHandle": "bravo-milano-12k-indoor-units",
+      "productUrl": null
+    },
+    {
+      "sku": "BRV-M18-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460257661177",
+      "productId": "gid://shopify/Product/9275879358713",
+      "productHandle": "bravo-milano-multi-zone-outdoor-condenser-unit-18-000-btu-230v-seer2-23-ductless-mini-split-heat-pump-inverter-heating-amp-cooling",
+      "productUrl": null
+    },
+    {
+      "sku": "BRV-M18CT-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275879391481",
+      "productHandle": "bravo-milano-ductless-mini-split-ac-heat-pump-18-000-btu-230v-ceiling-cassette-unit-inverter-heating-cooling",
+      "productUrl": null
+    },
+    {
+      "sku": "BRV-M18DT-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275879588089",
+      "productHandle": "bravo-milano-ducted-mini-split-ac-heat-pump-18000-btu-230v-seer2-24-slim-duct-unit-inverter-heating-cooling",
+      "productUrl": null
+    },
+    {
+      "sku": "BRV-M18FC-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275872608505",
+      "productHandle": "bravo-milano-18-000-btu-universal-floor-ceiling-ductless-mini-split-ac-heat-pump-230v-inverter",
+      "productUrl": null
+    },
+    {
+      "sku": "BRV-M18WM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275879260409",
+      "productHandle": "bravo-milano-18k-indoor-units",
+      "productUrl": null
+    },
+    {
+      "sku": "BRV-M24-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460256776441",
+      "productId": "gid://shopify/Product/9275878998265",
+      "productHandle": "milano-outdoor-24",
+      "productUrl": null
+    },
+    {
+      "sku": "BRV-M24CT-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275879457017",
+      "productHandle": "bravo-milano-ductless-mini-split-ac-heat-pump-24-000-btu-230v-ceiling-cassette-unit-inverter-heating-cooling-copy",
+      "productUrl": null
+    },
+    {
+      "sku": "BRV-M24DT-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275873919225",
+      "productHandle": "bravo-milano-ducted-mini-split-ac-heat-pump-24000-btu-230v-seer2-24-slim-duct-unit-inverter-heating-cooling",
+      "productUrl": null
+    },
+    {
+      "sku": "BRV-M24FC-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275872674041",
+      "productHandle": "bravo-milano-24-000-btu-universal-floor-ceiling-ductless-mini-split-ac-heat-pump-230v-inverter",
+      "productUrl": null
+    },
+    {
+      "sku": "BRV-M24WM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275879293177",
+      "productHandle": "bravo-milano-24k-indoor-units",
+      "productUrl": null
+    },
+    {
+      "sku": "BRV-M30-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460256710905",
+      "productId": "gid://shopify/Product/9275878932729",
+      "productHandle": "milano-outdoor-30",
+      "productUrl": null
+    },
+    {
+      "sku": "BRV-M36-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460256678137",
+      "productId": "gid://shopify/Product/9275878899961",
+      "productHandle": "milano-outdoor-36",
+      "productUrl": null
+    },
+    {
+      "sku": "BRV-M42-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460256547065",
+      "productId": "gid://shopify/Product/9275878801657",
+      "productHandle": "milano-outdoor-test",
+      "productUrl": null
+    },
+    {
+      "sku": "CASSETTE09HP-230C-P-O",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275871527161",
+      "productHandle": "mrcool-olympus-cassette-9-000-btu-3-4-ton-cassette09hp-230c-p-o",
+      "productUrl": null
+    },
+    {
+      "sku": "CASSETTE12HP-230C-P-O",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275871625465",
+      "productHandle": "mrcool-olympus-cassette-12-000-btu-1-ton-cassette12hp-230c-p-o",
+      "productUrl": null
+    },
+    {
+      "sku": "CASSETTE18HP-230C-P-O",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275871658233",
+      "productHandle": "mrcool-olympus-cassette-18-000-btu-1-5-ton-cassette18hp-230c-p-o",
+      "productUrl": null
+    },
+    {
+      "sku": "CASSETTE24HP-230C-P-O",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275871691001",
+      "productHandle": "mrcool-olympus-cassette-24-000-btu-2-ton-cassette24hp-230c-p-o",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-06MCT1W-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275881357561",
+      "productHandle": "ch-06mct1w-w",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-06MOLVWM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275880046841",
+      "productHandle": "ch-06molvwm-230-vi-olivia6kbtuindoor",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-09MCT1W-W",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275881423097",
+      "productHandle": "ch-09mct1w-w",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-09MOLVWM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275880112377",
+      "productHandle": "ch-09molvwm-230vi-olivia9kbtuindoor",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-12MCT1W-W",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275881521401",
+      "productHandle": "ch-12mct1w-w",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-12MMC-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275882045689",
+      "productHandle": "ch-12mmc-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-12MOLVWM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275880210681",
+      "productHandle": "ch-12molvwm-230vi-olivia-indoor",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-12MSPHCT-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275880702201",
+      "productHandle": "ch-12msphct-230vi-12000btuceilingcassetteindoorunit",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-16MMC-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275882078457",
+      "productHandle": "ch-16mmc-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-18MCT1W-W",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275881554169",
+      "productHandle": "ch-18mct1w-w",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-18MES-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460260937977",
+      "productId": "gid://shopify/Product/9275880833273",
+      "productHandle": "ch-18mes-230vo-18000btuoutdoorcondenser",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-18MOLVWM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275880276217",
+      "productHandle": "ch-18molvwm-230vi-18000indoorolivia",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-18MSPHFC-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275881783545",
+      "productHandle": "ch-18msphfc-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-24MCT-W",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275880767737",
+      "productHandle": "ch-24mct-w-24000btuceilingcassetteindoorunit",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-24MOLVWM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275880308985",
+      "productHandle": "ch-24molvwm-230vi-24000btuolivia",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-24MSPHFC-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275881849081",
+      "productHandle": "ch-24msphfc-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-28MES-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460261003513",
+      "productId": "gid://shopify/Product/9275880866041",
+      "productHandle": "ch-28mes-230vo-28000btuoutdoorcondenserunit",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-30ELVWM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275880341753",
+      "productHandle": "ch-30molvwm-230vi-30000btuoliviaindoorunit",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-36ELVWM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275880440057",
+      "productHandle": "cooper-hunter-multi-zone-36-000-btu-230v-olivia-series-indoor-wall-mount-air-conditioning-unit-for-heat-pump-mini-split-inverter-system-up-to-26-4-seer2-with-wi-fi-and-optional-installation-kit-ch-36molvwm-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-36MES-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460261069049",
+      "productId": "gid://shopify/Product/9275880964345",
+      "productHandle": "ch-36mes-230vo-36000btuoutdoorunit",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-48MES-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460261134585",
+      "productId": "gid://shopify/Product/9275881029881",
+      "productHandle": "ch-48mes-230vo-48000btuoutdoorunit",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-55MES-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460261167353",
+      "productId": "gid://shopify/Product/9275881062649",
+      "productHandle": "ch-55mes-230vo-55000btuoutdoorunit",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-B06MOLVWM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275880472825",
+      "productHandle": "ch-b06molvwm-230vi-oliviamidnight6000btuindoor",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-B09MOLVWM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275880505593",
+      "productHandle": "ch-b09molvwm-230vi-9kbtuoliviamidnight",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-B12MOLVWM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275880538361",
+      "productHandle": "ch-b12molvwm-230vi-12000btuoliviamidnightindoor",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-B18MOLVWM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460260315385",
+      "productId": "gid://shopify/Product/9275880603897",
+      "productHandle": "ch-b18molvwm-230vi-18000btuoliviamidnightindoor",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-B24MOLVWM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275880636665",
+      "productHandle": "ch-b24molvwm-230vi-24kbtuoliviamidnightindoor",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-HPR19M-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460261200121",
+      "productId": "gid://shopify/Product/9275881095417",
+      "productHandle": "ch-hpr19m-230vo",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-HPR28M-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460261232889",
+      "productId": "gid://shopify/Product/9275881128185",
+      "productHandle": "ch-hpr28m-230vo",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-HPR36M-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460261298425",
+      "productId": "gid://shopify/Product/9275881193721",
+      "productHandle": "ch-hpr36m-230vo",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-HPR48M-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460261363961",
+      "productId": "gid://shopify/Product/9275881259257",
+      "productHandle": "ch-hpr48m-230vo",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-HPR55M-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460261396729",
+      "productId": "gid://shopify/Product/9275881292025",
+      "productHandle": "ch-hpr55m-230vo",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-M09DTUI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275881586937",
+      "productHandle": "ch-m09dtui",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-M12DTUI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275881652473",
+      "productHandle": "ch-m12dtui",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-M18DTUI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275881685241",
+      "productHandle": "ch-m18dtui",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-M24AHU-W",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275881980153",
+      "productHandle": "ch-m24ahu-w",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-M24DTUI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275881750777",
+      "productHandle": "ch-24mdt-w",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-R06MOLVWM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275873132793",
+      "productHandle": "cooper-hunter-olivia-series-r454b-6-000-btu-white-wall-mount-indoor-unit-230v-mini-split-heat-pump-inverter-system-up-to-26-seer2-with-wi-fi-optional-installation-kit-ch-r06molvwm-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-R09MOLVWM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275872837881",
+      "productHandle": "cooper-hunter-olivia-series-r454b-9-000-btu-white-wall-mount-indoor-unit-230v-mini-split-heat-pump-inverter-system-up-to-26-seer2-with-wi-fi-optional-installation-kit-ch-r09molvwm-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-R12MOLVWM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275872968953",
+      "productHandle": "cooper-hunter-olivia-series-r454b-12-000-btu-black-wall-mount-indoor-unit-230v-mini-split-heat-pump-inverter-system-up-to-26-seer2-with-wi-fi-optional-installation-kit-ch-r12molvwm-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-R18MES-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460253171961",
+      "productId": "gid://shopify/Product/9275877392633",
+      "productHandle": "cooper-hunter-multi-zone-r454b-18-000-btu-1-5-ton-230v-outdoor-condenser-air-conditioner-heat-pump-mini-split-inverter-system-up-to-25-1-seer2-2-3-zones-ch-r18mes-230vo",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-R18MOLVWM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275873034489",
+      "productHandle": "cooper-hunter-olivia-series-r454b-18-000-btu-wall-mount-indoor-unit-230v-mini-split-heat-pump-inverter-system-up-to-26-seer2-with-wi-fi-optional-installation-kit-ch-r18molvwm-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-R24MOLVWM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275873067257",
+      "productHandle": "cooper-hunter-olivia-series-r454b-24-000-btu-wall-mount-indoor-unit-230v-mini-split-heat-pump-inverter-system-up-to-26-seer2-with-wi-fi-optional-installation-kit-ch-r24molvwm-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-R28MES-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460253106425",
+      "productId": "gid://shopify/Product/9275877359865",
+      "productHandle": "cooper-hunter-multi-zone-r454b-28-000-btu-2-3-ton-230v-outdoor-condenser-air-conditioner-heat-pump-mini-split-inverter-system-up-to-25-seer2-2-4-zones-ch-r28mes-230vo",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-R30MELVWM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275873198329",
+      "productHandle": "cooper-hunter-olivia-series-r454b-30-000-btu-white-wall-mount-indoor-unit-230v-mini-split-heat-pump-inverter-system-up-to-26-seer2-with-wi-fi-optional-installation-kit-ch-r30melvwm-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-R36MELVWM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275873296633",
+      "productHandle": "cooper-hunter-olivia-series-r454b-36-000-btu-white-wall-mount-indoor-unit-230v-mini-split-heat-pump-inverter-system-up-to-26-seer2-with-wi-fi-optional-installation-kit-ch-r36melvwm-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-R36MES-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460253204729",
+      "productId": "gid://shopify/Product/9275877458169",
+      "productHandle": "cooper-hunter-multi-zone-r454b-36-000-btu-3-ton-230v-outdoor-condenser-air-conditioner-heat-pump-mini-split-inverter-system-up-to-24-seer2-3-5-zones-ch-r36mes-230vo",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-R48MES-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460253237497",
+      "productId": "gid://shopify/Product/9275877490937",
+      "productHandle": "cooper-hunter-multi-zone-r410a-48-000-btu-4-ton-230v-outdoor-condenser-air-conditioner-heat-pump-mini-split-inverter-system-up-to-24-seer2-2-6-zones-ch-r48mes-230vo",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-R60MES-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460241637625",
+      "productId": "gid://shopify/Product/9275871101177",
+      "productHandle": "cooper-hunter-multi-zone-r454b-60-000-btu-5-ton-230v-outdoor-condenser-air-conditioner-heat-pump-mini-split-inverter-system-up-to-24-seer2-2-6-zones-ch-r60mes-230vo",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RB09MOLVWM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275878572281",
+      "productHandle": "cooper-hunter-olivia-midnight-series-r454b-9-000-btu-black-wall-mount-indoor-unit-230v-mini-split-heat-pump-inverter-system-up-to-26-seer2-with-wi-fi-optional-installation-kit-ch-rb09molvwm-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RB12MOLVWM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275878670585",
+      "productHandle": "cooper-hunter-olivia-midnight-series-r454b-12-000-btu-black-wall-mount-indoor-unit-230v-mini-split-heat-pump-inverter-system-up-to-26-seer2-with-wi-fi-optional-installation-kit-ch-rb12molvwm-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RB18MOLVWM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275878703353",
+      "productHandle": "cooper-hunter-olivia-midnight-series-r454b-18-000-btu-black-wall-mount-indoor-unit-230v-mini-split-heat-pump-inverter-system-up-to-26-seer2-with-wi-fi-optional-installation-kit-ch-rb18molvwm-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RB24MOLVWM-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275878768889",
+      "productHandle": "cooper-hunter-olivia-midnight-series-r454b-24-000-btu-black-wall-mount-indoor-unit-230v-mini-split-heat-pump-inverter-system-up-to-26-seer2-with-wi-fi-optional-installation-kit-ch-rb24molvwm-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RH09MCT",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275877163257",
+      "productHandle": "cooper-hunter-multi-zone-r454b-9-000-btu-230v-indoor-four-way-ceiling-cassette-air-conditioning-unit-for-heat-pump-mini-split-inverter-system-up-to-22-6-seer2-with-choose-installation-kit-humidity-sensor-kit-ch-rh09mct",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RH12MCT",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275877196025",
+      "productHandle": "cooper-hunter-multi-zone-r454b-12-000-btu-230v-indoor-four-way-ceiling-cassette-air-conditioning-unit-for-heat-pump-mini-split-inverter-system-up-to-22-6-seer2-with-humidity-sensor-choose-installation-kit-ch-rh12mct",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RH18MCT",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275877228793",
+      "productHandle": "cooper-hunter-multi-zone-r454b-18-000-btu-230v-indoor-four-way-ceiling-cassette-air-conditioning-unit-for-heat-pump-mini-split-inverter-system-up-to-22-7-seer2-with-wi-fi-enabled-thermostat-and-humidity-sensor-choose-your-installation-kit-ch-rh18mct",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RH24MCT",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275877294329",
+      "productHandle": "cooper-hunter-multi-zone-r454b-24-000-btu-230v-indoor-four-way-ceiling-cassette-air-conditioning-unit-for-heat-pump-mini-split-inverter-system-up-to-22-6-seer2-with-wi-fi-enabled-thermostat-and-humidity-sensor-choose-installation-kit-ch-rsh24mct",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RS06-12MDT- MS",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275877589241",
+      "productHandle": "cooper-hunter-multi-zone-r454b-6-000-btu-230v-slim-duct-concealed-duct-air-conditioning-indoor-unit-for-heat-pump-mini-split-inverter-system-up-to-21-4-seer2-with-choice-of-optional-installation-kit-ch-rs06mdt-ms",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RS18MAHU",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275877982457",
+      "productHandle": "cooper-hunter-multi-zone-r410a-18-000-btu-230v-multi-position-air-handler-air-conditioning-indoor-unit-for-heat-pump-ductless-mini-split-inverter-system-up-to-19-7-seer2-wi-fi-thermostat-optional-install-kit-and-auxiliary-heat-strip-ch-rs18mahu",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RS18MDT-MS",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275877720313",
+      "productHandle": "cooper-hunter-multi-zone-r454b-18-000-btu-230v-slim-duct-concealed-duct-air-conditioning-indoor-unit-for-heat-pump-mini-split-inverter-system-up-to-21-4-seer2-with-choice-of-optional-installation-kit-ch-rs18mdt-ms",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RS24MAHU",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275878080761",
+      "productHandle": "cooper-hunter-multi-zone-r454b-24-000-btu-230v-multi-position-air-handler-air-conditioning-indoor-unit-for-heat-pump-ductless-mini-split-inverter-system-up-to-19-7-seer2-wi-fi-thermostat-optional-install-kit-and-auxiliary-heat-strip-ch-rs24mahu",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RS24MDT-HS",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275877753081",
+      "productHandle": "cooper-hunter-multi-zone-r454b-24-000-btu-230v-slim-duct-concealed-duct-air-conditioning-indoor-unit-for-heat-pump-mini-split-inverter-system-up-to-21-4-seer2-with-choice-of-optional-installation-kit-ch-rs24mdt-hs",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RS30MAHU",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275878113529",
+      "productHandle": "cooper-hunter-multi-zone-r454b-30-000-btu-230v-multi-position-air-handler-air-conditioning-indoor-unit-for-heat-pump-ductless-mini-split-inverter-system-up-to-19-7-seer2-wi-fi-thermostat-optional-install-kit-and-auxiliary-heat-strip-ch-rs30mahu",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RSH06-12MCT1W",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275878441209",
+      "productHandle": "cooper-hunter-multi-zone-r454b-dip-switch-6-000-9-000-12-000-btu-230v-one-way-ceiling-cassette-air-conditioning-indoor-unit-for-heat-pump-mini-split-inverter-system-up-to-24-seer2-w-wi-fi-enabled-thermostat-and-optional-installation-kit-ch-rsh06-12mct1w",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RSH09MMC",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275878375673",
+      "productHandle": "cooper-hunter-multi-zone-r454b-9-000-btu-230v-indoor-mini-floor-console-air-conditioning-unit-for-heat-pump-ductless-mini-split-inverter-system-up-to-27-2-seer2-with-optional-installation-kit-ch-rsh09mmc",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RSH12MMC",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275878310137",
+      "productHandle": "cooper-hunter-multi-zone-r454b-12-000-btu-230v-indoor-mini-floor-console-air-conditioning-unit-for-heat-pump-ductless-mini-split-inverter-system-up-to-25-seer2-with-optional-installation-kit-ch-rsh12mmc",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RSH16MMC",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275878342905",
+      "productHandle": "cooper-hunter-multi-zone-r454b-18-000-btu-230v-indoor-mini-floor-console-air-conditioning-unit-for-heat-pump-ductless-mini-split-inverter-system-up-to-27-2-seer2-with-optional-installation-kit-ch-rsh16mmc",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RSH18MCT1W",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275878539513",
+      "productHandle": "cooper-hunter-multi-zone-r454b-18-000-btu-230v-one-way-ceiling-cassette-air-conditioning-indoor-unit-for-heat-pump-mini-split-inverter-system-up-to-24-seer2-with-wi-fi-enabled-thermostat-and-optional-installation-kit-ch-rsh18mct1w",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RSH18MFC",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275878146297",
+      "productHandle": "cooper-hunter-multi-zone-r454b-18-000-btu-230v-universal-floor-ceiling-air-conditioning-indoor-unit-for-heat-pump-mini-split-inverter-system-up-to-23-seer2-with-choice-of-optional-installation-kit-ch-rsh18mfc",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RSH24MFC",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275878211833",
+      "productHandle": "cooper-hunter-multi-zone-r454b-24-000-btu-230v-universal-floor-ceiling-air-conditioning-indoor-unit-for-heat-pump-mini-split-inverter-system-up-to-23-seer2-with-choice-of-optional-installation-kit-ch-rsh24mfc",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RVHP19M-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460254318841",
+      "productId": "gid://shopify/Product/9275877949689",
+      "productHandle": "cooper-hunter-high-efficiency-hyper-heat-multi-zone-r454b-19-000-btu-1-58-ton-230v-outdoor-condenser-air-conditioner-heat-pump-mini-split-inverter-system-up-to-25-seer2-2-3-zonesch-rvhp19m-230vo",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RVHP28M-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460253958393",
+      "productId": "gid://shopify/Product/9275877884153",
+      "productHandle": "cooper-hunter-high-efficiency-hyper-heat-multi-zone-r454b-28-000-btu-2-33-ton-230v-outdoor-condenser-air-conditioner-heat-pump-mini-split-inverter-system-up-to-23-seer2-2-4-zones-ch-rvhp28m-230vo",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RVHP28M230VO",
+      "matched": true,
+      "matchMode": "manual",
+      "variantId": "gid://shopify/ProductVariant/47460253958393",
+      "productId": "gid://shopify/Product/9275877884153",
+      "productHandle": "cooper-hunter-high-efficiency-hyper-heat-multi-zone-r454b-28-000-btu-2-33-ton-230v-outdoor-condenser-air-conditioner-heat-pump-mini-split-inverter-system-up-to-23-seer2-2-4-zones-ch-rvhp28m-230vo",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RVHP36M-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460253925625",
+      "productId": "gid://shopify/Product/9275877851385",
+      "productHandle": "cooper-hunter-high-efficiency-hyper-heat-multi-zone-r454b-36-000-btu-3-ton-230v-outdoor-condenser-air-conditioner-heat-pump-mini-split-inverter-system-up-to-23-seer2-2-5-zones-ch-rvhp36m-230vo",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RVHP48M-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460253892857",
+      "productId": "gid://shopify/Product/9275877818617",
+      "productHandle": "cooper-hunter-high-efficiency-hyper-heat-multi-zone-r454b-48-000-btu-4-ton-230v-outdoor-condenser-air-conditioner-heat-pump-mini-split-inverter-system-up-to-22-2-seer2-2-6-zones-ch-rvhp48m-230vo",
+      "productUrl": null
+    },
+    {
+      "sku": "CH-RVHP55M-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460253860089",
+      "productId": "gid://shopify/Product/9275877785849",
+      "productHandle": "cooper-hunter-high-efficiency-hyper-heat-multi-zone-r454b-55-000-btu-4-5-ton-230v-outdoor-condenser-air-conditioner-heat-pump-mini-split-inverter-system-up-to-21-4-seer2-2-6-zones-ch-rvhp55m-230vo",
+      "productUrl": null
+    },
+    {
+      "sku": "DIY-06-HP-WMAH-230D25-O",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275876409593",
+      "productHandle": "mrcool-6k-btu-diy-5th-generation-wall-mounted-multi-zone-air-handler-230v-diy-06-hp-wmah-230d25-o",
+      "productUrl": null
+    },
+    {
+      "sku": "DIY-09-HP-WMAH-230D25-O",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275876507897",
+      "productHandle": "mrcool-9-000-btu-5th-gen-diy-multi-zone-wall-mounted-air-handler-r-454b-diy-09-hp-wmah-230d25-o",
+      "productUrl": null
+    },
+    {
+      "sku": "DIY-12-HP-WMAH-230D25-O",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275870150905",
+      "productHandle": "mrcool-12-000-btu-5th-gen-diy-multi-zone-wall-mounted-air-handler-r-454b-diy-12-hp-wmah-230d25-o",
+      "productUrl": null
+    },
+    {
+      "sku": "DIY-18-HP-WMAH-230D25-O",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275870773497",
+      "productHandle": "mrcool-18-000-btu-5th-gen-diy-multi-zone-wall-mounted-air-handler-r-454b-diy-18-hp-wmah-230d25-o",
+      "productUrl": null
+    },
+    {
+      "sku": "DIY-24-HP-MUAH-230D25-O",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275871396089",
+      "productHandle": "mrcool-24-000-btu-diy-hybrid™-multi-position-air-handler-r-454b-diy-24-hp-muah-230d25-o",
+      "productUrl": null
+    },
+    {
+      "sku": "DIY-24-HP-WMAH-230D25-O",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275870839033",
+      "productHandle": "mrcool-24-000-btu-5th-gen-diy-multi-zone-wall-mounted-air-handler-r-454b-diy-24-hp-wmah-230d25-o",
+      "productUrl": null
+    },
+    {
+      "sku": "DIY-36-HP-MUAH-230D25-O",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275871494393",
+      "productHandle": "mrcool-36-000-btu-diy-hybrid™-multi-position-air-handler-r-454b-diy-36-hp-muah-230d25-o",
+      "productUrl": null
+    },
+    {
+      "sku": "DIY-36-HP-WMAH-230D25-O",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275870904569",
+      "productHandle": "mrcool-36-000-btu-5th-gen-diy-multi-zone-wall-mounted-air-handler-r-454b-diy-36-hp-wmah-230d25-o",
+      "productUrl": null
+    },
+    {
+      "sku": "DIY-MULTI3-18HP230D-O",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460239474937",
+      "productId": "gid://shopify/Product/9275870216441",
+      "productHandle": "mrcool-18-000-btu-5th-gen-diy-3-zone-multi-split-condenser-r-454b-diy-multi3-18hp230d-o",
+      "productUrl": null
+    },
+    {
+      "sku": "DIY-MULTI4-27HP230D-O",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460239573241",
+      "productId": "gid://shopify/Product/9275870281977",
+      "productHandle": "mrcool-27-000-btu-5th-gen-diy-4-zone-multi-split-condenser-r-454b-diy-multi4-27hp230d-o",
+      "productUrl": null
+    },
+    {
+      "sku": "DIY-MULTI5-36HP230D-O",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460239769849",
+      "productId": "gid://shopify/Product/9275870347513",
+      "productHandle": "mrcool-36-000-btu-5th-gen-diy-5-zone-multi-split-condenser-r-454b-diy-multi5-36hp230d-o",
+      "productUrl": null
+    },
+    {
+      "sku": "DIY-MULTI6-48HP230D-O",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460239835385",
+      "productId": "gid://shopify/Product/9275870413049",
+      "productHandle": "mrcool-48-000-btu-5th-gen-diy-6-zone-multi-split-condenser-r-454b-diy-multi6-48hp230d-o",
+      "productUrl": null
+    },
+    {
+      "sku": "DIY-MULTI6-55HP230D-O",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460239900921",
+      "productId": "gid://shopify/Product/9275870478585",
+      "productHandle": "mrcool-55-000-btu-5th-gen-diy-6-zone-multi-split-condenser-r-454b-diy-multi6-55hp230d-o",
+      "productUrl": null
+    },
+    {
+      "sku": "DIYCASSETTE06HP-230D25-O",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275870544121",
+      "productHandle": "mrcool-diy®-5th-gen-outtasight®-6k-btu-ceiling-cassette-r-454b-diycassette06hp-230d25-o",
+      "productUrl": null
+    },
+    {
+      "sku": "DIYCASSETTE09HP-230D25-O",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275870609657",
+      "productHandle": "mrcool-diy-5th-gen-outtasight-9k-btu-ceiling-cassette-r-454b-diycassette09hp-230d25-o",
+      "productUrl": null
+    },
+    {
+      "sku": "DIYCASSETTE12HP-230D25-O",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275870642425",
+      "productHandle": "mrcool-diy®-5th-gen-outtasight®-12k-btu-ceiling-cassette-r-454b-diycassette12hp-230d25-o",
+      "productUrl": null
+    },
+    {
+      "sku": "DIYCASSETTE18HP-230D25-O",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275870675193",
+      "productHandle": "mrcool-diy-5th-gen-outtasight-18k-btu-ceiling-cassette-r-454b-diycassette18hp-230d25-o",
+      "productUrl": null
+    },
+    {
+      "sku": "DUCT-09HP-230B-O",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275872018681",
+      "productHandle": "duct-09hp-230b-o",
+      "productUrl": null
+    },
+    {
+      "sku": "DUCT-12HP-230B-O",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275871920377",
+      "productHandle": "mrcool-olympus-duct-12-000-btu-1-ton-duct-12hp-230b-o",
+      "productUrl": null
+    },
+    {
+      "sku": "DUCT-18HP-230B-O",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275871887609",
+      "productHandle": "mrcool-olympus-duct-18-000-btu-1-5-ton-duct-18hp-230b-o",
+      "productUrl": null
+    },
+    {
+      "sku": "DUCT-24HP-230B-O",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275871756537",
+      "productHandle": "mrcool-olympus-duct-24-000-btu-2-ton-duct-24hp-230b-o",
+      "productUrl": null
+    },
+    {
+      "sku": "ES-18Z-M3C",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460248355065",
+      "productId": "gid://shopify/Product/9275874771193",
+      "productHandle": "aciq-18-000-btu-1-5-ton-25-1-seer2-high-efficiency-multi-zone-condenser-inverter-r454b",
+      "productUrl": null
+    },
+    {
+      "sku": "ES-27Z-M3B",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460249534713",
+      "productId": "gid://shopify/Product/9275875459321",
+      "productHandle": "aciq-27-000-2-25-ton-24-6-seer2-multi-zone-condenser-inverter-r410a",
+      "productUrl": null
+    },
+    {
+      "sku": "ES-27Z-M4C",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460248420601",
+      "productId": "gid://shopify/Product/9275874836729",
+      "productHandle": "aciq-27-000-btu-2-25-ton-25-seer2-multi-zone-condenser-inverter-r454b",
+      "productUrl": null
+    },
+    {
+      "sku": "ES-36Z-M5C",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460248551673",
+      "productId": "gid://shopify/Product/9275874935033",
+      "productHandle": "aciq-36-000-3-ton-24-seer2-multi-zone-condenser-inverter-r454b",
+      "productUrl": null
+    },
+    {
+      "sku": "ES-48Z-M5B",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460249600249",
+      "productId": "gid://shopify/Product/9275875524857",
+      "productHandle": "aciq-48-000-4-ton-23-4-seer2-multi-zone-condenser-inverter-r410a",
+      "productUrl": null
+    },
+    {
+      "sku": "ES-48Z-M6C",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460248682745",
+      "productId": "gid://shopify/Product/9275875098873",
+      "productHandle": "aciq-48-000-btu-4-ton-24-seer2-aciq-multi-zone-condenser-r454b",
+      "productUrl": null
+    },
+    {
+      "sku": "ES-55Z-M5B",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460249633017",
+      "productId": "gid://shopify/Product/9275875557625",
+      "productHandle": "aciq-55-000-4-5-ton-21-3-seer2-multi-zone-condenser-inverter-r410a",
+      "productUrl": null
+    },
+    {
+      "sku": "ES-55Z-M6C",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460248748281",
+      "productId": "gid://shopify/Product/9275875164409",
+      "productHandle": "aciq-55-000-btu-4-5-tons-22-0-seer2-multi-zone-condenser-inverter-r454b",
+      "productUrl": null
+    },
+    {
+      "sku": "MULTI3-18HP230C-O",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460244717817",
+      "productId": "gid://shopify/Product/9275872313593",
+      "productHandle": "mrcool-olympus-18-000-btu-4th-gen-multi-zone-heat-pump-condenser-multi3-18hp230c-o",
+      "productUrl": null
+    },
+    {
+      "sku": "MULTI4-27HP230C-O",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460244783353",
+      "productId": "gid://shopify/Product/9275872379129",
+      "productHandle": "mrcool-olympus-27-000-btu-4th-gen-multi-zone-heat-pump-condenser-multi4-27hp230c-o",
+      "productUrl": null
+    },
+    {
+      "sku": "MULTI5-36HP230C-O",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460244816121",
+      "productId": "gid://shopify/Product/9275872411897",
+      "productHandle": "mrcool-olympus-36-000-btu-4th-gen-multi-zone-heat-pump-condenser-multi5-36hp230c-o",
+      "productUrl": null
+    },
+    {
+      "sku": "MULTI6-48HP230C-O",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460244881657",
+      "productId": "gid://shopify/Product/9275872477433",
+      "productHandle": "mrcool-olympus-48-000-btu-4th-gen-multi-zone-heat-pump-condenser-multi6-48hp230c-o",
+      "productUrl": null
+    },
+    {
+      "sku": "O-09-HP-WMAH-230C-O",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275872084217",
+      "productHandle": "mrcool-olympus-4th-gen-wall-ah-9-000-btu-3-4-ton-o-09-hp-wmah-230c-o",
+      "productUrl": null
+    },
+    {
+      "sku": "O-12-HP-WMAH-230C-O",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275872116985",
+      "productHandle": "mrcool-olympus-4th-gen-wall-ah-12-000-btu-1-ton-o-12-hp-wmah-230c-o",
+      "productUrl": null
+    },
+    {
+      "sku": "O-18-HP-WMAH-230C-O",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275872149753",
+      "productHandle": "mrcool-olympus-4th-gen-wall-ah-18-000-btu-1-5-ton-o-18-hp-wmah-230c-o",
+      "productUrl": null
+    },
+    {
+      "sku": "O-24-HP-WMAH-230C-O",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275872248057",
+      "productHandle": "mrcool-olympus-4th-gen-wall-ah-24-000-btu-2-ton-o-24-hp-wmah-230c-o",
+      "productUrl": null
+    },
+    {
+      "sku": "OS-09SRW-230VI",
+      "matched": true,
+      "matchMode": "manual",
+      "variantId": "gid://shopify/ProductVariant/47460252090617",
+      "productId": "gid://shopify/Product/9275876933881",
+      "productHandle": "olmo-multi-zone-r410a-9-000-btu-230v-olmo-sierra-series-indoor-wall-mount-air-conditioning-unit-for-heat-pump-mini-split-inverter-system-up-to-22-seer2-with-wi-fi-optional-installation-kit-os-m09rw-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "OS-M09SRW-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275876933881",
+      "productHandle": "olmo-multi-zone-r410a-9-000-btu-230v-olmo-sierra-series-indoor-wall-mount-air-conditioning-unit-for-heat-pump-mini-split-inverter-system-up-to-22-seer2-with-wi-fi-optional-installation-kit-os-m09rw-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "OS-M12SRW-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275882242297",
+      "productHandle": "olmo-multi-zone-r410a-12-000-btu-230v-olmo-sierra-series-indoor-wall-mount-air-conditioning-unit-for-heat-pump-mini-split-inverter-system-up-to-22-seer2-with-wi-fi-optional-installation-kit-os-m12srw-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "OS-M18SRW-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275882176761",
+      "productHandle": "olmo-multi-zone-r410a-18-000-btu-230v-olmo-sierra-series-indoor-wall-mount-air-conditioning-unit-for-heat-pump-mini-split-inverter-system-up-to-22-seer2-with-wi-fi-optional-installation-kit-os-m18srw-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "OS-M24SRW-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275882143993",
+      "productHandle": "olmo-multi-zone-r410a-24-000-btu-230v-olmo-sierra-series-indoor-wall-mount-air-conditioning-unit-for-heat-pump-mini-split-inverter-system-up-to-22-seer2-with-wi-fi-optional-installation-kit-os-m24srw-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "OS-MSR18-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460252254457",
+      "productId": "gid://shopify/Product/9275876966649",
+      "productHandle": "olmo-multi-zone-r410a-18-000-btu-3-5-ton-230v-outdoor-condenser-air-conditioner-heat-pump-mini-split-inverter-system-up-to-23-4-seer2-2-5-zones-os-msr42-230vo-copy",
+      "productUrl": null
+    },
+    {
+      "sku": "OS-MSR24-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460252287225",
+      "productId": "gid://shopify/Product/9275876999417",
+      "productHandle": "olmo-multi-zone-r410a-24-000-btu-2-ton-230v-outdoor-condenser-air-conditioner-heat-pump-mini-split-inverter-system-up-to-23-4-seer2-os-msr42-230vo",
+      "productUrl": null
+    },
+    {
+      "sku": "OS-MSR36-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460252352761",
+      "productId": "gid://shopify/Product/9275877064953",
+      "productHandle": "olmo-multi-zone-r410a-36-000-btu-2-5-ton-230v-outdoor-condenser-air-conditioner-heat-pump-mini-split-inverter-system-up-to-23-4-seer2-os-msr42-230vo",
+      "productUrl": null
+    },
+    {
+      "sku": "OS-MSR42-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460263887097",
+      "productId": "gid://shopify/Product/9275882111225",
+      "productHandle": "olmo-multi-zone-r410a-42-000-btu-3-5-ton-230v-outdoor-condenser-air-conditioner-heat-pump-mini-split-inverter-system-up-to-23-4-seer2-2-5-zones-ch-48mes-230vo",
+      "productUrl": null
+    },
+    {
+      "sku": "OS-RM09SW-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275871002873",
+      "productHandle": "olmo-multi-zone-r454b-9-000-btu-230v-olmo-sierra-series-indoor-wall-mount-air-conditioning-unit-for-heat-pump-mini-split-inverter-system-up-to-22-seer2-with-wi-fi-optional-installation-kit-os-rm09sw-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "OS-RM12SW-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275871068409",
+      "productHandle": "olmo-multi-zone-r454b-12-000-btu-230v-olmo-sierra-series-indoor-wall-mount-air-conditioning-unit-for-heat-pump-mini-split-inverter-system-up-to-22-seer2-with-wi-fi-optional-installation-kit-os-rm12sw-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "OS-RM18SW-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275876311289",
+      "productHandle": "olmo-multi-zone-r454b-18-000-btu-230v-olmo-sierra-series-indoor-wall-mount-air-conditioning-unit-for-heat-pump-mini-split-inverter-system-up-to-22-seer2-with-wi-fi-optional-installation-kit-os-rm18sw-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "OS-RM24SW-230VI",
+      "matched": true,
+      "matchMode": "auto_exact_product",
+      "variantId": null,
+      "productId": "gid://shopify/Product/9275876344057",
+      "productHandle": "olmo-multi-zone-r454b-24-000-btu-230v-olmo-sierra-series-indoor-wall-mount-air-conditioning-unit-for-heat-pump-mini-split-inverter-system-up-to-22-seer2-with-wi-fi-optional-installation-kit-os-rm24sw-230vi",
+      "productUrl": null
+    },
+    {
+      "sku": "OS-RMS18-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460250616057",
+      "productId": "gid://shopify/Product/9275876212985",
+      "productHandle": "olmo-multi-zone-r454b-18-000-btu-1-5-ton-230v-outdoor-condenser-air-conditioner-heat-pump-mini-split-inverter-system-up-to-22-seer2-os-msr18-230vo-copy",
+      "productUrl": null
+    },
+    {
+      "sku": "OS-RMS27-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460241309945",
+      "productId": "gid://shopify/Product/9275870970105",
+      "productHandle": "olmo-multi-zone-r454b-27-000-btu-2-25-ton-230v-outdoor-condenser-air-conditioner-heat-pump-mini-split-inverter-system-up-to-22-seer2-os-rm27sw-230vo",
+      "productUrl": null
+    },
+    {
+      "sku": "OS-RMS36-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460250648825",
+      "productId": "gid://shopify/Product/9275876245753",
+      "productHandle": "olmo-multi-zone-r454b-36-000-btu-3-ton-230v-outdoor-condenser-air-conditioner-heat-pump-mini-split-inverter-system-up-to-22-seer2-os-rmsr36-230vo",
+      "productUrl": null
+    },
+    {
+      "sku": "OS-RMS42-230VO",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460250681593",
+      "productId": "gid://shopify/Product/9275876278521",
+      "productHandle": "olmo-multi-zone-r454b-42-000-btu-3-5-ton-230v-outdoor-condenser-air-conditioner-heat-pump-mini-split-inverter-system-up-to-22-seer2-2-5-zones-os-rmsr42-230vo",
+      "productUrl": null
+    },
+    {
+      "sku": "SCC-0612-HH-MB",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460248289529",
+      "productId": "gid://shopify/Product/9275874705657",
+      "productHandle": "aciq-6-000-12-000-btu-slim-ceiling-cassette-mini-split-air-handler-with-hyper-heat-r454b-aciq-scc-0612-hh-mb",
+      "productUrl": null
+    },
+    {
+      "sku": "SCC-18-HH-MB",
+      "matched": true,
+      "matchMode": "auto_exact",
+      "variantId": "gid://shopify/ProductVariant/47460240687353",
+      "productId": "gid://shopify/Product/9275870740729",
+      "productHandle": "18-000-btu-slim-ceiling-cassette-aciq-mini-split-air-handler-r454b",
+      "productUrl": null
+    }
+  ]
+}

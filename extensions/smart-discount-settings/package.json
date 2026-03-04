@@ -1,0 +1,11 @@
+{
+  "name": "smart-discount-settings",
+  "private": true,
+  "version": "1.0.0",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@preact/signals": "^2.3.1",
+    "preact": "^10.10.6",
+    "@shopify/ui-extensions": "~2026.1.0"
+  }
+}

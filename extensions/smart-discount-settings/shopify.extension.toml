@@ -1,0 +1,16 @@
+api_version = "2026-01"
+
+[[extensions]]
+name = "t:name"
+description = "t:description"
+handle = "smart-discount-settings"
+uid = "8ee5b4c5-dbc7-566e-c9d7-b6407d4870a7a6b77c3f"
+type = "ui_extension"
+
+[[extensions.targeting]]
+module = "./src/DiscountFunctionSettings.tsx"
+target = "admin.discount-details.function-settings.render"
+
+[[extensions.metafields]]
+namespace = "$app"
+key = "function-configuration"

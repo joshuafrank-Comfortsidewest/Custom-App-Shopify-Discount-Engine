@@ -1,0 +1,10 @@
+{
+  "name": "Smart discount settings",
+  "description": "Configure smart discount collection IDs",
+  "title": "Smart Discount Settings",
+  "collection5": "Collection GID for 5% item discount",
+  "collection10": "Collection GID for 10% item discount",
+  "hint": "Use full IDs like gid://shopify/Collection/123456789",
+  "saved": "Saved",
+  "save": "Save"
+}
