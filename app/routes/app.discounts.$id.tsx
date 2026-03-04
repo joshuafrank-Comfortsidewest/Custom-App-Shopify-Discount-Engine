@@ -373,7 +373,7 @@ const FUNCTION_CONFIG_MAX_BYTES = 10_000;
 const FUNCTION_CONFIG_KEY = "function-configuration";
 const ADMIN_CONFIG_KEY = "admin-configuration";
 const FUNCTION_CONFIG_CHUNK_KEY_PREFIX = "function-configuration-part-";
-const FUNCTION_CONFIG_MAX_CHUNKS = 4;
+const FUNCTION_CONFIG_MAX_CHUNKS = 8;
 
 function splitUtf8ByBytes(input: string, maxBytes: number): string[] {
   if (maxBytes <= 0) return [input];
