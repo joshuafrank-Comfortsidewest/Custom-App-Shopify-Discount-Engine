@@ -373,7 +373,7 @@ const FUNCTION_CONFIG_MAX_BYTES = 10_000;
 const FUNCTION_CONFIG_KEY = "function-configuration";
 const ADMIN_CONFIG_KEY = "admin-configuration";
 const FUNCTION_CONFIG_CHUNK_KEY_PREFIX = "function-configuration-part-";
-const FUNCTION_CONFIG_MAX_CHUNKS = 8;
+const FUNCTION_CONFIG_MAX_CHUNKS = 4;
 
 function splitUtf8ByBytes(input: string, maxBytes: number): string[] {
   if (maxBytes <= 0) return [input];
@@ -413,6 +413,97 @@ function compactProductIds(values: unknown): string[] {
 }
 
 function buildRuntimeFunctionConfig(config: DiscountConfig) {
+  const itemRulesEnabled = Boolean(config.toggles?.item_collection_enabled);
+  const otherRuleEnabled = Boolean(config.toggles?.collection_spend_enabled || config.collection_spend_rule?.enabled);
+  const hvacRuleEnabled = Boolean(config.toggles?.hvac_enabled || config.hvac_rule?.enabled);
+
+  const runtimeItemCollectionRules = itemRulesEnabled
+    ? (config.item_collection_rules ?? [])
+        .map((rule) => ({
+          percent: normalizeNum(rule?.percent, 0),
+          product_ids: compactProductIds(rule?.product_ids),
+        }))
+        .filter((rule) => rule.percent > 0 && rule.product_ids.length > 0)
+    : [];
+
+  const runtimeCollectionSpendRule = otherRuleEnabled
+    ? {
+        enabled: true,
+        amount_off_per_step: normalizeNum(
+          config.collection_spend_rule?.amount_off_per_step,
+          DEFAULT_CONFIG.collection_spend_rule.amount_off_per_step,
+        ),
+        min_collection_qty: normalizeNum(
+          config.collection_spend_rule?.min_collection_qty,
+          DEFAULT_CONFIG.collection_spend_rule.min_collection_qty,
+        ),
+        spend_step_amount: normalizeNum(
+          config.collection_spend_rule?.spend_step_amount,
+          DEFAULT_CONFIG.collection_spend_rule.spend_step_amount,
+        ),
+        product_ids: compactProductIds(config.collection_spend_rule?.product_ids),
+        activation: {
+          ...DEFAULT_CONFIG.collection_spend_rule.activation,
+          ...(config.collection_spend_rule?.activation ?? {}),
+        },
+      }
+    : {
+        ...DEFAULT_CONFIG.collection_spend_rule,
+        enabled: false,
+        product_ids: [],
+        activation: {
+          ...DEFAULT_CONFIG.collection_spend_rule.activation,
+        },
+      };
+
+  const runtimeHvacCombinationRules = hvacRuleEnabled
+    ? (config.hvac_rule?.combination_rules ?? [])
+        .filter((rule) => Boolean(rule?.enabled))
+        .map((rule) => ({
+          name: String(rule?.name ?? "").trim(),
+          enabled: true,
+          outdoor_source_sku: String(rule?.outdoor_source_sku ?? "").trim(),
+          min_indoor_per_outdoor: normalizeNum(
+            rule?.min_indoor_per_outdoor,
+            config.hvac_rule?.min_indoor_per_outdoor ?? DEFAULT_CONFIG.hvac_rule.min_indoor_per_outdoor,
+          ),
+          max_indoor_per_outdoor: normalizeNum(
+            rule?.max_indoor_per_outdoor,
+            config.hvac_rule?.max_indoor_per_outdoor ?? DEFAULT_CONFIG.hvac_rule.max_indoor_per_outdoor,
+          ),
+          indoor_product_ids: compactProductIds(rule?.indoor_product_ids),
+          percent_off_hvac_products: normalizeNum(rule?.percent_off_hvac_products, 0),
+          amount_off_outdoor_per_bundle: normalizeNum(rule?.amount_off_outdoor_per_bundle, 0),
+          stack_mode: rule?.stack_mode === "exclusive_best" ? "exclusive_best" : "stackable",
+          outdoor_product_ids: compactProductIds(rule?.outdoor_product_ids),
+        }))
+        .filter(
+          (rule) =>
+            rule.outdoor_product_ids.length > 0 &&
+            rule.indoor_product_ids.length > 0 &&
+            (rule.percent_off_hvac_products > 0 || rule.amount_off_outdoor_per_bundle > 0),
+        )
+    : [];
+
+  const runtimeHvacRule = {
+    enabled: hvacRuleEnabled,
+    min_indoor_per_outdoor: normalizeNum(
+      config.hvac_rule?.min_indoor_per_outdoor,
+      DEFAULT_CONFIG.hvac_rule.min_indoor_per_outdoor,
+    ),
+    max_indoor_per_outdoor: normalizeNum(
+      config.hvac_rule?.max_indoor_per_outdoor,
+      DEFAULT_CONFIG.hvac_rule.max_indoor_per_outdoor,
+    ),
+    percent_off_hvac_products: normalizeNum(config.hvac_rule?.percent_off_hvac_products, 0),
+    amount_off_outdoor_per_bundle: normalizeNum(config.hvac_rule?.amount_off_outdoor_per_bundle, 0),
+    indoor_product_ids: [],
+    outdoor_product_ids: [],
+    combination_rules: runtimeHvacCombinationRules,
+  };
+
+  const includeLegacyItemFallback = runtimeItemCollectionRules.length === 0;
+
   return {
     toggles: config.toggles,
     first_order_percent: config.first_order_percent,
@@ -424,59 +515,25 @@ function buildRuntimeFunctionConfig(config: DiscountConfig) {
     bulk10_percent: config.bulk10_percent,
     bulk13_percent: config.bulk13_percent,
     bulk15_percent: config.bulk15_percent,
-    item_collection_rules: (config.item_collection_rules ?? []).map((rule) => ({
-      collection_id: rule.collection_id ?? "",
-      percent: rule.percent ?? 0,
-      product_ids: compactProductIds(rule.product_ids),
-    })),
-    collection_spend_rule: {
-      ...config.collection_spend_rule,
-      product_ids: compactProductIds(config.collection_spend_rule?.product_ids),
-      activation: {
-        ...DEFAULT_CONFIG.collection_spend_rule.activation,
-        ...(config.collection_spend_rule?.activation ?? {}),
-      },
-    },
-    hvac_rule: {
-      ...config.hvac_rule,
-      indoor_product_ids: compactProductIds(config.hvac_rule?.indoor_product_ids),
-      outdoor_product_ids: compactProductIds(config.hvac_rule?.outdoor_product_ids),
-      combination_rules: (config.hvac_rule?.combination_rules ?? []).map((rule) => ({
-        // Keep runtime config lean: include only fields the function consumes.
-        name: String(rule?.name ?? "").trim(),
-        enabled: Boolean(rule?.enabled),
-        outdoor_source_sku: String(rule?.outdoor_source_sku ?? "").trim(),
-        min_indoor_per_outdoor: normalizeNum(
-          rule?.min_indoor_per_outdoor,
-          config.hvac_rule?.min_indoor_per_outdoor ?? DEFAULT_CONFIG.hvac_rule.min_indoor_per_outdoor,
-        ),
-        max_indoor_per_outdoor: normalizeNum(
-          rule?.max_indoor_per_outdoor,
-          config.hvac_rule?.max_indoor_per_outdoor ?? DEFAULT_CONFIG.hvac_rule.max_indoor_per_outdoor,
-        ),
-        indoor_mode: rule?.indoor_mode === "selected_types" ? "selected_types" : "all",
-        selected_head_types: Array.isArray(rule?.selected_head_types)
-          ? Array.from(new Set(rule.selected_head_types.map((v: any) => normalizeHeadType(v)).filter(Boolean)))
-          : [],
-        indoor_series_mode: rule?.indoor_series_mode === "selected_series" ? "selected_series" : "all",
-        selected_series: Array.isArray(rule?.selected_series)
-          ? Array.from(new Set(rule.selected_series.map((v: any) => String(v ?? "").trim()).filter(Boolean)))
-          : [],
-        indoor_product_ids: compactProductIds(rule.indoor_product_ids),
-        percent_off_hvac_products: normalizeNum(rule?.percent_off_hvac_products, 0),
-        amount_off_outdoor_per_bundle: normalizeNum(rule?.amount_off_outdoor_per_bundle, 0),
-        stack_mode: rule?.stack_mode === "exclusive_best" ? "exclusive_best" : "stackable",
-        outdoor_product_ids: compactProductIds(rule.outdoor_product_ids),
-      })),
-    },
+    item_collection_rules: runtimeItemCollectionRules,
+    collection_spend_rule: runtimeCollectionSpendRule,
+    hvac_rule: runtimeHvacRule,
     cart_labels: config.cart_labels,
     block_if_any_entered_discount_code: config.block_if_any_entered_discount_code,
     return_conflict_enabled: config.return_conflict_enabled,
     return_blocked_codes: config.return_blocked_codes,
-    item_collection_5_percent: config.item_collection_5_percent,
-    item_collection_10_percent: config.item_collection_10_percent,
-    collection_5_product_ids: compactProductIds(config.collection_5_product_ids),
-    collection_10_product_ids: compactProductIds(config.collection_10_product_ids),
+    item_collection_5_percent: includeLegacyItemFallback
+      ? config.item_collection_5_percent
+      : 5,
+    item_collection_10_percent: includeLegacyItemFallback
+      ? config.item_collection_10_percent
+      : 10,
+    collection_5_product_ids: includeLegacyItemFallback
+      ? compactProductIds(config.collection_5_product_ids)
+      : [],
+    collection_10_product_ids: includeLegacyItemFallback
+      ? compactProductIds(config.collection_10_product_ids)
+      : [],
   };
 }
 

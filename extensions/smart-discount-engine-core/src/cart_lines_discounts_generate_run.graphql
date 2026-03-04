@@ -89,17 +89,5 @@ query Input {
     appFunctionConfigPart4Metafield: metafield(namespace: "$app", key: "function-configuration-part-4") {
       value
     }
-    appFunctionConfigPart5Metafield: metafield(namespace: "$app", key: "function-configuration-part-5") {
-      value
-    }
-    appFunctionConfigPart6Metafield: metafield(namespace: "$app", key: "function-configuration-part-6") {
-      value
-    }
-    appFunctionConfigPart7Metafield: metafield(namespace: "$app", key: "function-configuration-part-7") {
-      value
-    }
-    appFunctionConfigPart8Metafield: metafield(namespace: "$app", key: "function-configuration-part-8") {
-      value
-    }
   }
 }
