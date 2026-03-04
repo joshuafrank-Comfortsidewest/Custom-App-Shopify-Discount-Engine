@@ -205,6 +205,13 @@ struct RuntimeConfig {
     collection_10_product_ids: Vec<String>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+struct RuntimeConfigChunkManifest {
+    chunked: bool,
+    parts: usize,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 struct CartLabelsConfig {
@@ -257,15 +264,37 @@ impl Default for RuntimeConfig {
 fn cart_lines_discounts_generate_run(
     input: schema::cart_lines_discounts_generate_run::Input,
 ) -> Result<schema::CartLinesDiscountsGenerateRunResult> {
+    let discount = input.discount();
     let app_function_config_metafield_json = input
         .discount()
         .app_function_config_metafield()
         .map(|metafield| metafield.value())
         .map(|value| value.as_str());
-    let metafield_json = app_function_config_metafield_json;
+    let app_function_config_chunk_values = [
+        discount
+            .app_function_config_part_1_metafield()
+            .map(|metafield| metafield.value())
+            .map(|value| value.as_str()),
+        discount
+            .app_function_config_part_2_metafield()
+            .map(|metafield| metafield.value())
+            .map(|value| value.as_str()),
+        discount
+            .app_function_config_part_3_metafield()
+            .map(|metafield| metafield.value())
+            .map(|value| value.as_str()),
+        discount
+            .app_function_config_part_4_metafield()
+            .map(|metafield| metafield.value())
+            .map(|value| value.as_str()),
+    ];
+    let metafield_json = resolve_runtime_config_json(
+        app_function_config_metafield_json,
+        &app_function_config_chunk_values,
+    );
     let use_tag_item_fallback = metafield_json.is_none();
 
-    let config = runtime_config(metafield_json);
+    let config = runtime_config(metafield_json.as_deref());
 
     let has_product_discount_class = input
         .discount()
@@ -921,6 +950,40 @@ fn runtime_config(raw_json: Option<&str>) -> RuntimeConfig {
     raw_json
         .and_then(|raw| serde_json::from_str::<RuntimeConfig>(raw).ok())
         .unwrap_or_default()
+}
+
+fn resolve_runtime_config_json(primary: Option<&str>, chunks: &[Option<&str>]) -> Option<String> {
+    if let Some(raw) = primary {
+        if let Ok(manifest) = serde_json::from_str::<RuntimeConfigChunkManifest>(raw) {
+            if manifest.chunked {
+                let mut joined = String::new();
+                let parts = manifest.parts.min(chunks.len());
+                for idx in 0..parts {
+                    if let Some(part) = chunks[idx] {
+                        if !part.is_empty() {
+                            joined.push_str(part);
+                        }
+                    }
+                }
+                return if joined.is_empty() { None } else { Some(joined) };
+            }
+        }
+        if !raw.is_empty() {
+            return Some(raw.to_string());
+        }
+    }
+
+    let mut fallback = String::new();
+    for part in chunks.iter().flatten() {
+        if !part.is_empty() {
+            fallback.push_str(part);
+        }
+    }
+    if fallback.is_empty() {
+        None
+    } else {
+        Some(fallback)
+    }
 }
 
 fn build_product_item_percents(config: &RuntimeConfig) -> HashMap<String, f64> {

@@ -372,6 +372,28 @@ async function tagsRemove(admin: any, productId: string, tags: string[]): Promis
 const FUNCTION_CONFIG_MAX_BYTES = 10_000;
 const FUNCTION_CONFIG_KEY = "function-configuration";
 const ADMIN_CONFIG_KEY = "admin-configuration";
+const FUNCTION_CONFIG_CHUNK_KEY_PREFIX = "function-configuration-part-";
+const FUNCTION_CONFIG_MAX_CHUNKS = 4;
+
+function splitUtf8ByBytes(input: string, maxBytes: number): string[] {
+  if (maxBytes <= 0) return [input];
+  const chunks: string[] = [];
+  let current = "";
+  let currentBytes = 0;
+  for (const ch of input) {
+    const chBytes = Buffer.byteLength(ch, "utf8");
+    if (current && currentBytes + chBytes > maxBytes) {
+      chunks.push(current);
+      current = ch;
+      currentBytes = chBytes;
+    } else {
+      current += ch;
+      currentBytes += chBytes;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks.length ? chunks : [""];
+}
 
 function compactProductId(value: unknown): string {
   const raw = String(value ?? "").trim();
@@ -475,19 +497,57 @@ async function persistConfig(
       },
     };
   }
-  if (Buffer.byteLength(runtimePayload, "utf8") > FUNCTION_CONFIG_MAX_BYTES) {
-    return {
-      data: {
-        metafieldsSet: {
-          userErrors: [
-            {
-              field: ["metafieldsSet"],
-              message: `Runtime function config exceeds ${FUNCTION_CONFIG_MAX_BYTES} bytes after compaction.`,
-            },
-          ],
+  const runtimeMetafields: Array<{
+    ownerId: string;
+    namespace: string;
+    key: string;
+    type: string;
+    value: string;
+  }> = [];
+  const runtimeBytes = Buffer.byteLength(runtimePayload, "utf8");
+
+  if (runtimeBytes <= FUNCTION_CONFIG_MAX_BYTES) {
+    runtimeMetafields.push({
+      ownerId: cleanedOwnerId,
+      namespace: "$app",
+      key: FUNCTION_CONFIG_KEY,
+      type: "json",
+      value: runtimePayload,
+    });
+  } else {
+    const chunks = splitUtf8ByBytes(runtimePayload, FUNCTION_CONFIG_MAX_BYTES);
+    if (chunks.length > FUNCTION_CONFIG_MAX_CHUNKS) {
+      return {
+        data: {
+          metafieldsSet: {
+            userErrors: [
+              {
+                field: ["metafieldsSet"],
+                message: `Runtime function config is too large (${runtimeBytes} bytes). Reduce selected item/HVAC products or use fewer large collection rules.`,
+              },
+            ],
+          },
         },
-      },
-    };
+      };
+    }
+
+    runtimeMetafields.push({
+      ownerId: cleanedOwnerId,
+      namespace: "$app",
+      key: FUNCTION_CONFIG_KEY,
+      type: "json",
+      value: JSON.stringify({ chunked: true, parts: chunks.length }),
+    });
+
+    chunks.forEach((chunk, idx) => {
+      runtimeMetafields.push({
+        ownerId: cleanedOwnerId,
+        namespace: "$app",
+        key: `${FUNCTION_CONFIG_CHUNK_KEY_PREFIX}${idx + 1}`,
+        type: "multi_line_text_field",
+        value: chunk,
+      });
+    });
   }
 
   const response = await admin.graphql(
@@ -498,13 +558,7 @@ async function persistConfig(
     {
       variables: {
         metafields: [
-          {
-            ownerId: cleanedOwnerId,
-            namespace: "$app",
-            key: FUNCTION_CONFIG_KEY,
-            type: "json",
-            value: runtimePayload,
-          },
+          ...runtimeMetafields,
           {
             ownerId: cleanedOwnerId,
             namespace: "$app",
