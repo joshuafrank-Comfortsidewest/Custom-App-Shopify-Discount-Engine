@@ -420,15 +420,17 @@ function buildRuntimeFunctionConfig(config: DiscountConfig) {
   const runtimeItemCollectionRules = itemRulesEnabled
     ? (config.item_collection_rules ?? [])
         .map((rule) => ({
+          collection_id: String(rule?.collection_id ?? "").trim(),
           percent: normalizeNum(rule?.percent, 0),
           product_ids: compactProductIds(rule?.product_ids),
         }))
-        .filter((rule) => rule.percent > 0 && rule.product_ids.length > 0)
+        .filter((rule) => rule.collection_id && rule.percent > 0 && rule.product_ids.length > 0)
     : [];
 
   const runtimeCollectionSpendRule = otherRuleEnabled
     ? {
         enabled: true,
+        collection_id: String(config.collection_spend_rule?.collection_id ?? "").trim(),
         amount_off_per_step: normalizeNum(
           config.collection_spend_rule?.amount_off_per_step,
           DEFAULT_CONFIG.collection_spend_rule.amount_off_per_step,
@@ -450,6 +452,7 @@ function buildRuntimeFunctionConfig(config: DiscountConfig) {
     : {
         ...DEFAULT_CONFIG.collection_spend_rule,
         enabled: false,
+        collection_id: "",
         product_ids: [],
         activation: {
           ...DEFAULT_CONFIG.collection_spend_rule.activation,
