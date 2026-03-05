@@ -564,6 +564,7 @@ async function persistConfig(
     type: string;
     value: string;
   }> = [];
+  let runtimeWarning: string | null = null;
   const runtimeBytes = Buffer.byteLength(runtimePayload, "utf8");
 
   if (runtimeBytes <= FUNCTION_CONFIG_MAX_BYTES) {
@@ -577,37 +578,26 @@ async function persistConfig(
   } else {
     const chunks = splitUtf8ByBytes(runtimePayload, FUNCTION_CONFIG_MAX_BYTES);
     if (chunks.length > FUNCTION_CONFIG_MAX_CHUNKS) {
-      return {
-        data: {
-          metafieldsSet: {
-            userErrors: [
-              {
-                field: ["metafieldsSet"],
-                message: `Runtime function config is too large (${runtimeBytes} bytes). Reduce selected item/HVAC products or use fewer large collection rules.`,
-              },
-            ],
-          },
-        },
-      };
-    }
-
-    runtimeMetafields.push({
-      ownerId: cleanedOwnerId,
-      namespace: "$app",
-      key: FUNCTION_CONFIG_KEY,
-      type: "json",
-      value: JSON.stringify({ chunked: true, parts: chunks.length }),
-    });
-
-    chunks.forEach((chunk, idx) => {
+      runtimeWarning = `Runtime function config is too large (${runtimeBytes} bytes). Settings were saved, but checkout runtime was not updated. Reduce selected item/HVAC products or use fewer large collection rules, then save again.`;
+    } else {
       runtimeMetafields.push({
         ownerId: cleanedOwnerId,
         namespace: "$app",
-        key: `${FUNCTION_CONFIG_CHUNK_KEY_PREFIX}${idx + 1}`,
-        type: "multi_line_text_field",
-        value: chunk,
+        key: FUNCTION_CONFIG_KEY,
+        type: "json",
+        value: JSON.stringify({ chunked: true, parts: chunks.length }),
       });
-    });
+
+      chunks.forEach((chunk, idx) => {
+        runtimeMetafields.push({
+          ownerId: cleanedOwnerId,
+          namespace: "$app",
+          key: `${FUNCTION_CONFIG_CHUNK_KEY_PREFIX}${idx + 1}`,
+          type: "multi_line_text_field",
+          value: chunk,
+        });
+      });
+    }
   }
 
   const response = await admin.graphql(
@@ -638,6 +628,9 @@ async function persistConfig(
   }));
   for (const e of json?.errors ?? []) {
     userErrors.push({ field: ["graphql"], message: String(e?.message ?? "GraphQL error") });
+  }
+  if (runtimeWarning) {
+    userErrors.push({ field: ["runtime"], message: runtimeWarning });
   }
 
   return {
@@ -1582,12 +1575,12 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             .filter(Boolean);
     const selectedHeadTypeSet = new Set(selectedHeadTypes);
     const selectedSeriesSet = new Set(selectedSeries);
-    const ruleBrand = String(
-      jsonRule?.combo_brand ??
-        fd.get(`hvac_combo_brand_${i}`) ??
-        outdoorBrandBySku.get(outdoorSourceSku) ??
-        "",
+    const selectedRuleBrand = String(
+      jsonRule?.combo_brand ?? fd.get(`hvac_combo_brand_${i}`) ?? "",
     ).trim();
+    const resolvedRuleBrand =
+      selectedRuleBrand || String(outdoorBrandBySku.get(outdoorSourceSku) ?? "").trim();
+    const ruleBrand = resolvedRuleBrand;
     const ruleRefrigerant = String(outdoorRefrigerantBySku.get(outdoorSourceSku) ?? "").trim();
     const baseIndoorSourceSkus = Array.from(hvacIndoorBySourceSku.keys());
     const brandRefrigerantFilteredSourceSkus = baseIndoorSourceSkus.filter((sku) => {
@@ -1640,9 +1633,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         jsonRule != null
           ? Boolean(jsonRule?.enabled)
           : toBool(fd.get(`hvac_combo_enabled_${i}`), true),
-      combo_brand: String(
-        jsonRule?.combo_brand ?? fd.get(`hvac_combo_brand_${i}`) ?? "",
-      ).trim(),
+      combo_brand: resolvedRuleBrand,
       outdoor_source_sku: outdoorSourceSku,
       min_indoor_per_outdoor: c?.minHeads ?? 2,
       max_indoor_per_outdoor: c?.maxHeads ?? 6,
@@ -1894,6 +1885,29 @@ export default function DiscountDetailsRoute() {
   const hvacDisplayOrder = hvacComboRules
     .map((_, idx) => idx)
     .sort((a, b) => Number(hvacComboRules[b]?.enabled) - Number(hvacComboRules[a]?.enabled) || a - b);
+  const itemRulesForSubmit = rules.map((rule) => ({
+    collection_id: String(rule?.collection_id ?? "").trim(),
+    percent: Number(rule?.percent ?? 0),
+  }));
+  const hvacComboRulesForSubmit = hvacComboRules.map((rule) => ({
+    name: String(rule?.name ?? "").trim(),
+    enabled: Boolean(rule?.enabled),
+    combo_brand: String(rule?.combo_brand ?? "").trim(),
+    outdoor_source_sku: String(rule?.outdoor_source_sku ?? "").trim(),
+    min_indoor_per_outdoor: Number(rule?.min_indoor_per_outdoor ?? 2),
+    max_indoor_per_outdoor: Number(rule?.max_indoor_per_outdoor ?? 6),
+    indoor_mode: rule?.indoor_mode === "selected_types" ? "selected_types" : "all",
+    selected_head_types: Array.isArray(rule?.selected_head_types)
+      ? rule.selected_head_types.map((v) => normalizeHeadType(v)).filter(Boolean)
+      : [],
+    indoor_series_mode: rule?.indoor_series_mode === "selected_series" ? "selected_series" : "all",
+    selected_series: Array.isArray(rule?.selected_series)
+      ? rule.selected_series.map((v) => String(v ?? "").trim()).filter(Boolean)
+      : [],
+    percent_off_hvac_products: Number(rule?.percent_off_hvac_products ?? 0),
+    amount_off_outdoor_per_bundle: Number(rule?.amount_off_outdoor_per_bundle ?? 0),
+    stack_mode: rule?.stack_mode === "exclusive_best" ? "exclusive_best" : "stackable",
+  }));
 
   return (
     <s-page heading={`Smart Discount ${id}`}>
@@ -1923,12 +1937,16 @@ export default function DiscountDetailsRoute() {
           }}
         >
           <input type="hidden" name="item_rule_count" value={rules.length} />
-          <input type="hidden" name="item_rules_json" value={encodeURIComponent(JSON.stringify(rules))} />
+          <input
+            type="hidden"
+            name="item_rules_json"
+            value={encodeURIComponent(JSON.stringify(itemRulesForSubmit))}
+          />
           <input type="hidden" name="hvac_combo_rule_count" value={hvacComboRules.length} />
           <input
             type="hidden"
             name="hvac_combo_rules_json"
-            value={encodeURIComponent(JSON.stringify(hvacComboRules))}
+            value={encodeURIComponent(JSON.stringify(hvacComboRulesForSubmit))}
           />
 
           {"ok" in (actionData ?? {}) ? (
