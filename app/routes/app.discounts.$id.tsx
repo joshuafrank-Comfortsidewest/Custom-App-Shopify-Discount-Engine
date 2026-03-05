@@ -1597,37 +1597,16 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       hvacIndoorBySourceSku.set(sku, Array.from(new Set(list)));
     }
   }
-  const hvacComboRulesJsonRawEncoded = String(fd.get("hvac_combo_rules_json") ?? "").trim();
-  const hvacComboRulesJsonRaw = hvacComboRulesJsonRawEncoded
-    ? (() => {
-        try {
-          return decodeURIComponent(hvacComboRulesJsonRawEncoded);
-        } catch {
-          return hvacComboRulesJsonRawEncoded;
-        }
-      })()
-    : "";
-  let hvacComboRulesFromJson: any[] | null = null;
-  if (hvacComboRulesJsonRaw) {
-    try {
-      const parsed = JSON.parse(hvacComboRulesJsonRaw);
-      if (Array.isArray(parsed)) hvacComboRulesFromJson = parsed;
-    } catch {
-      hvacComboRulesFromJson = null;
-    }
-  }
   const comboRuleCountFromForm = Math.max(
     0,
     Math.trunc(toNum(fd.get("hvac_combo_rule_count"), 0)),
   );
-  // Always allow rebuilding rules from named form fields, even if hidden JSON parse fails.
+  // Rebuild rules from named form fields to avoid stale hidden-JSON state.
   const hasHvacComboInputs = fd.has("hvac_combo_rule_count");
-  const comboRuleCount = hvacComboRulesFromJson
-    ? hvacComboRulesFromJson.length
-    : comboRuleCountFromForm;
+  const comboRuleCount = comboRuleCountFromForm;
   const hvacCombinationRules: HvacCombinationRule[] = [];
   for (let i = 0; i < comboRuleCount; i += 1) {
-    const jsonRule = hvacComboRulesFromJson ? hvacComboRulesFromJson[i] ?? {} : null;
+    const jsonRule = null;
     const outdoorSourceSku = String(
       jsonRule?.outdoor_source_sku ?? fd.get(`hvac_combo_outdoor_sku_${i}`) ?? "",
     ).trim();
