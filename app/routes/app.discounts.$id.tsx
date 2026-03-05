@@ -1551,7 +1551,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
     const outdoorProductIds = hvacOutdoorBySourceSku.get(outdoorSourceSku) ?? [];
     const c = outdoorCatalogConstraints[outdoorSourceSku];
-    const allowedIndoorSourceSkus = c?.allowedIndoorSourceSkus ?? [];
     const indoorMode =
       String(jsonRule?.indoor_mode ?? fd.get(`hvac_combo_indoor_mode_${i}`) ?? "all") ===
       "selected_types"
@@ -1590,18 +1589,17 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         "",
     ).trim();
     const ruleRefrigerant = String(outdoorRefrigerantBySku.get(outdoorSourceSku) ?? "").trim();
-    const baseIndoorSourceSkus =
-      allowedIndoorSourceSkus.length > 0
-        ? allowedIndoorSourceSkus
-        : Array.from(hvacIndoorBySourceSku.keys());
+    const baseIndoorSourceSkus = Array.from(hvacIndoorBySourceSku.keys());
     let brandRefrigerantFilteredSourceSkus = baseIndoorSourceSkus.filter((sku) => {
       const indoorBrand = String(indoorBrandBySku.get(sku) ?? "").trim();
       const indoorRefrigerant = String(indoorRefrigerantBySku.get(sku) ?? "").trim();
       const brandOk = ruleBrand
-        ? norm(indoorBrand) === norm(ruleBrand)
+        ? indoorBrand
+          ? norm(indoorBrand) === norm(ruleBrand)
+          : norm(skuBrandKey(sku)) === norm(skuBrandKey(outdoorSourceSku))
         : norm(skuBrandKey(sku)) === norm(skuBrandKey(outdoorSourceSku));
       const refrigerantOk = ruleRefrigerant
-        ? norm(indoorRefrigerant) === norm(ruleRefrigerant)
+        ? !indoorRefrigerant || norm(indoorRefrigerant) === norm(ruleRefrigerant)
         : true;
       return brandOk && refrigerantOk;
     });
@@ -2207,20 +2205,18 @@ export default function DiscountDetailsRoute() {
                       const brand = String(selectedBrand || outdoorMeta?.sourceBrand || "").trim();
                       const outdoorRefrigerant = String(outdoorMeta?.sourceRefrigerant ?? "").trim();
                       const fallbackBrand = skuBrandKey(rule.outdoor_source_sku);
-                      const allowedIndoorSkuSet = new Set(constraint?.allowedIndoorSourceSkus ?? []);
                       const filteredIndoor = hvacIndoorOptions.filter((opt: any) => {
-                        if (allowedIndoorSkuSet.size > 0 && !allowedIndoorSkuSet.has(String(opt?.sourceSku ?? ""))) {
-                          return false;
-                        }
                         const indoorBrand = String(opt?.sourceBrand ?? "").trim();
                         const indoorRefrigerant = String(opt?.sourceRefrigerant ?? "").trim();
                         const brandOk = brand
-                          ? norm(indoorBrand) === norm(brand)
+                          ? indoorBrand
+                            ? norm(indoorBrand) === norm(brand)
+                            : norm(skuBrandKey(opt?.sourceSku ?? "")) === norm(skuBrandKey(rule.outdoor_source_sku))
                           : fallbackBrand
                             ? norm(skuBrandKey(opt?.sourceSku ?? "")) === norm(fallbackBrand)
                             : true;
                         const refrigerantOk = outdoorRefrigerant
-                          ? norm(indoorRefrigerant) === norm(outdoorRefrigerant)
+                          ? !indoorRefrigerant || norm(indoorRefrigerant) === norm(outdoorRefrigerant)
                           : true;
                         return brandOk && refrigerantOk;
                       });
