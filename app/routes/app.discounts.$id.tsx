@@ -3203,11 +3203,12 @@ export default function DiscountDetailsRoute() {
                       type="submit"
                       name="intent"
                       value="auto_tag_apply"
+                      formNoValidate
                       disabled={autoTagJob?.status === "running"}
                     >
                       Apply auto tag action
                     </button>
-                    <button type="submit" name="intent" value="auto_tag_run_due">
+                    <button type="submit" name="intent" value="auto_tag_run_due" formNoValidate>
                       Run due scheduled undos
                     </button>
                   </div>
