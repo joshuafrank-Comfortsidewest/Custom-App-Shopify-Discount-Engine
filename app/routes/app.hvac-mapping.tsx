@@ -93,6 +93,46 @@ function csvValue(row: Record<string, string>, candidates: string[]) {
   return "";
 }
 
+function extractSkuFromUnitMappingRow(row: Record<string, string>) {
+  return csvValue(row, [
+    "SKU",
+    "Sku",
+    "Condenser",
+    "Condenser SKU",
+    "Outdoor SKU",
+    "Outdoor",
+    "Model",
+    "Model Number",
+  ]);
+}
+
+function detectSourceTypeFromUnitMappingRow(row: Record<string, string>): "indoor" | "outdoor" | "unknown" {
+  const system = csvValue(row, ["System", "Type", "Category", "Unit Type", "Product Type"]);
+  const sourceType = csvValue(row, ["Source Type", "Indoor/Outdoor"]);
+  const joined = `${system} ${sourceType}`.toLowerCase();
+  if (
+    joined.includes("outdoor condenser") ||
+    joined.includes("condenser standard") ||
+    joined.includes("condenser hyper") ||
+    joined.includes("outdoor")
+  ) {
+    return "outdoor";
+  }
+  if (
+    joined.includes("wall mount") ||
+    joined.includes("cassette") ||
+    joined.includes("air handler") ||
+    joined.includes("floor console") ||
+    joined.includes("slim duct") ||
+    joined.includes("universal floor/ceiling") ||
+    joined.includes("concealed duct") ||
+    joined.includes("floor/ceiling")
+  ) {
+    return "indoor";
+  }
+  return "unknown";
+}
+
 function toIntOrNull(v: unknown) {
   const raw = norm(v);
   if (!raw) return null;
@@ -327,6 +367,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const intent = norm(form.get("intent"));
 
   if (intent === "import_csv") {
+    const unitMappingFile = form.get("unit_mapping_file");
     const sheet22 = form.get("sheet22_file");
     const sheet23 = form.get("sheet23_file");
     const extraSkusText = norm(form.get("extra_skus"));
@@ -334,41 +375,72 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const skuTypes = new Map<string, string>();
     const skuMeta = new Map<string, SkuSourceMeta>();
 
-    if (sheet22 instanceof File && sheet22.size > 0) {
-      const rows = parseCsv(await sheet22.text());
+    if (unitMappingFile instanceof File && unitMappingFile.size > 0) {
+      const rows = parseCsv(await unitMappingFile.text());
       for (const r of rows) {
-        const sku = csvValue(r, ["SKU"]);
+        const sku = extractSkuFromUnitMappingRow(r);
         if (!sku) continue;
-        skuTypes.set(sku, "indoor");
-        if (!skuMeta.has(sku)) {
-          skuMeta.set(sku, {
-            sourceBrand: csvValue(r, ["Brand"]) || null,
-            sourceSeries: csvValue(r, ["Series"]) || null,
-            sourceSystem: csvValue(r, ["System"]) || null,
-            sourceBtu: toIntOrNull(csvValue(r, ["BTU"])),
-            sourceRefrigerant: csvValue(r, ["Refrigerant"]) || null,
-          });
-        }
-      }
-    }
+        const detected = detectSourceTypeFromUnitMappingRow(r);
+        const prevType = skuTypes.get(sku);
+        // Outdoor must always win when both appear in the same import.
+        const nextType =
+          prevType === "outdoor" || detected === "outdoor"
+            ? "outdoor"
+            : prevType === "indoor" || detected === "indoor"
+              ? "indoor"
+              : prevType ?? detected;
+        skuTypes.set(sku, nextType);
 
-    if (sheet23 instanceof File && sheet23.size > 0) {
-      const rows = parseCsv(await sheet23.text());
-      for (const r of rows) {
-        const sku = csvValue(r, ["Condenser", "Condenser SKU", "Outdoor SKU", "Outdoor"]);
-        if (!sku) continue;
-        // Sheet23 is the combo source of truth for condenser SKUs.
-        // If a SKU appears in both sheets, it must be treated as outdoor.
-        skuTypes.set(sku, "outdoor");
         const existing = skuMeta.get(sku);
         skuMeta.set(sku, {
           sourceBrand: csvValue(r, ["Brand"]) || existing?.sourceBrand || null,
           sourceSeries: csvValue(r, ["Series"]) || existing?.sourceSeries || null,
           sourceSystem:
-            csvValue(r, ["Standard/Hyper", "System"]) || existing?.sourceSystem || null,
-          sourceBtu: existing?.sourceBtu ?? null,
+            csvValue(r, ["System", "Type", "Category", "Unit Type", "Product Type"]) ||
+            existing?.sourceSystem ||
+            null,
+          sourceBtu: toIntOrNull(csvValue(r, ["BTU"])) ?? existing?.sourceBtu ?? null,
           sourceRefrigerant: csvValue(r, ["Refrigerant"]) || existing?.sourceRefrigerant || null,
         });
+      }
+    } else {
+      // Backward compatibility with older two-file flow.
+      if (sheet22 instanceof File && sheet22.size > 0) {
+        const rows = parseCsv(await sheet22.text());
+        for (const r of rows) {
+          const sku = csvValue(r, ["SKU"]);
+          if (!sku) continue;
+          skuTypes.set(sku, "indoor");
+          if (!skuMeta.has(sku)) {
+            skuMeta.set(sku, {
+              sourceBrand: csvValue(r, ["Brand"]) || null,
+              sourceSeries: csvValue(r, ["Series"]) || null,
+              sourceSystem: csvValue(r, ["System"]) || null,
+              sourceBtu: toIntOrNull(csvValue(r, ["BTU"])),
+              sourceRefrigerant: csvValue(r, ["Refrigerant"]) || null,
+            });
+          }
+        }
+      }
+
+      if (sheet23 instanceof File && sheet23.size > 0) {
+        const rows = parseCsv(await sheet23.text());
+        for (const r of rows) {
+          const sku = csvValue(r, ["Condenser", "Condenser SKU", "Outdoor SKU", "Outdoor"]);
+          if (!sku) continue;
+          // Sheet23 is the combo source of truth for condenser SKUs.
+          // If a SKU appears in both sheets, it must be treated as outdoor.
+          skuTypes.set(sku, "outdoor");
+          const existing = skuMeta.get(sku);
+          skuMeta.set(sku, {
+            sourceBrand: csvValue(r, ["Brand"]) || existing?.sourceBrand || null,
+            sourceSeries: csvValue(r, ["Series"]) || existing?.sourceSeries || null,
+            sourceSystem:
+              csvValue(r, ["Standard/Hyper", "System"]) || existing?.sourceSystem || null,
+            sourceBtu: existing?.sourceBtu ?? null,
+            sourceRefrigerant: csvValue(r, ["Refrigerant"]) || existing?.sourceRefrigerant || null,
+          });
+        }
       }
     }
 
@@ -724,12 +796,8 @@ export default function HvacMappingPage() {
             <input type="hidden" name="intent" value="import_csv" />
             <div style={{ display: "grid", gap: 10 }}>
               <label>
-                Sheet22 CSV (indoor SKUs)
-                <input name="sheet22_file" type="file" accept=".csv,text/csv" />
-              </label>
-              <label>
-                Sheet23 CSV (outdoor SKUs / condenser)
-                <input name="sheet23_file" type="file" accept=".csv,text/csv" />
+                Unit mapping CSV (indoor + outdoor condenser)
+                <input name="unit_mapping_file" type="file" accept=".csv,text/csv" />
               </label>
               <label>
                 Extra SKUs (optional)

@@ -1590,33 +1590,16 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     ).trim();
     const ruleRefrigerant = String(outdoorRefrigerantBySku.get(outdoorSourceSku) ?? "").trim();
     const baseIndoorSourceSkus = Array.from(hvacIndoorBySourceSku.keys());
-    let brandRefrigerantFilteredSourceSkus = baseIndoorSourceSkus.filter((sku) => {
+    const brandRefrigerantFilteredSourceSkus = baseIndoorSourceSkus.filter((sku) => {
       const indoorBrand = String(indoorBrandBySku.get(sku) ?? "").trim();
       const indoorRefrigerant = String(indoorRefrigerantBySku.get(sku) ?? "").trim();
-      const brandOk = ruleBrand
-        ? indoorBrand
-          ? norm(indoorBrand) === norm(ruleBrand)
-          : norm(skuBrandKey(sku)) === norm(skuBrandKey(outdoorSourceSku))
-        : norm(skuBrandKey(sku)) === norm(skuBrandKey(outdoorSourceSku));
-      const refrigerantOk = ruleRefrigerant
-        ? !indoorRefrigerant || norm(indoorRefrigerant) === norm(ruleRefrigerant)
-        : true;
+      const brandOk = Boolean(ruleBrand) && Boolean(indoorBrand) && norm(indoorBrand) === norm(ruleBrand);
+      const refrigerantOk =
+        Boolean(ruleRefrigerant) &&
+        Boolean(indoorRefrigerant) &&
+        norm(indoorRefrigerant) === norm(ruleRefrigerant);
       return brandOk && refrigerantOk;
     });
-    if (brandRefrigerantFilteredSourceSkus.length === 0) {
-      // Fallback: keep brand/refrigerant constraints but do not restrict to catalog list.
-      brandRefrigerantFilteredSourceSkus = Array.from(hvacIndoorBySourceSku.keys()).filter((sku) => {
-        const indoorBrand = String(indoorBrandBySku.get(sku) ?? "").trim();
-        const indoorRefrigerant = String(indoorRefrigerantBySku.get(sku) ?? "").trim();
-        const brandOk = ruleBrand
-          ? norm(indoorBrand) === norm(ruleBrand)
-          : norm(skuBrandKey(sku)) === norm(skuBrandKey(outdoorSourceSku));
-        const refrigerantOk = ruleRefrigerant
-          ? norm(indoorRefrigerant) === norm(ruleRefrigerant)
-          : true;
-        return brandOk && refrigerantOk;
-      });
-    }
     const eligibleIndoorSourceSkus =
       indoorMode === "selected_types" && selectedHeadTypeSet.size > 0
         ? brandRefrigerantFilteredSourceSkus.filter((sku) =>
@@ -2204,20 +2187,14 @@ export default function DiscountDetailsRoute() {
                       const constraint = outdoorCatalogConstraints[rule.outdoor_source_sku];
                       const brand = String(selectedBrand || outdoorMeta?.sourceBrand || "").trim();
                       const outdoorRefrigerant = String(outdoorMeta?.sourceRefrigerant ?? "").trim();
-                      const fallbackBrand = skuBrandKey(rule.outdoor_source_sku);
                       const filteredIndoor = hvacIndoorOptions.filter((opt: any) => {
                         const indoorBrand = String(opt?.sourceBrand ?? "").trim();
                         const indoorRefrigerant = String(opt?.sourceRefrigerant ?? "").trim();
-                        const brandOk = brand
-                          ? indoorBrand
-                            ? norm(indoorBrand) === norm(brand)
-                            : norm(skuBrandKey(opt?.sourceSku ?? "")) === norm(skuBrandKey(rule.outdoor_source_sku))
-                          : fallbackBrand
-                            ? norm(skuBrandKey(opt?.sourceSku ?? "")) === norm(fallbackBrand)
-                            : true;
-                        const refrigerantOk = outdoorRefrigerant
-                          ? !indoorRefrigerant || norm(indoorRefrigerant) === norm(outdoorRefrigerant)
-                          : true;
+                        const brandOk = Boolean(brand) && Boolean(indoorBrand) && norm(indoorBrand) === norm(brand);
+                        const refrigerantOk =
+                          Boolean(outdoorRefrigerant) &&
+                          Boolean(indoorRefrigerant) &&
+                          norm(indoorRefrigerant) === norm(outdoorRefrigerant);
                         return brandOk && refrigerantOk;
                       });
                       const availableHeadTypes = Array.from(
