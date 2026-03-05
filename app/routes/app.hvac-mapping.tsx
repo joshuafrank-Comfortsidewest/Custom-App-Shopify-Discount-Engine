@@ -116,6 +116,14 @@ function toVariantGid(raw: string) {
   return v;
 }
 
+function toProductGid(raw: string) {
+  const v = norm(raw);
+  if (!v) return "";
+  if (v.startsWith("gid://shopify/Product/")) return v;
+  if (/^\d+$/.test(v)) return `gid://shopify/Product/${v}`;
+  return "";
+}
+
 async function adminGraphql(admin: any, query: string, variables: Record<string, unknown>) {
   const response = await admin.graphql(query, { variables });
   const json = await response.json();
@@ -548,33 +556,41 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     let variant: any = null;
     let productFromProductLookup: any = null;
-    const normalized = toVariantGid(variantIdInput);
+    const normalizedVariant = toVariantGid(variantIdInput);
+    const productCandidates = new Set<string>();
+    if (variantIdInput.includes("/Product/")) {
+      const explicit = norm(variantIdInput);
+      if (explicit) productCandidates.add(explicit);
+    }
+    const productFromNumeric = toProductGid(variantIdInput);
+    if (productFromNumeric) productCandidates.add(productFromNumeric);
 
-    if (normalized.includes("/Product/")) {
-      const productLookup = await lookupByProductId(admin, normalized, sku);
-      if (!productLookup) {
-        return { ok: false, message: `Product not found: ${variantIdInput}` } satisfies ActionResult;
-      }
-      variant = productLookup.id ? { id: productLookup.id, sku: productLookup.sku } : null;
+    // If a product ID is provided (or a plain numeric ID), prefer product lookup.
+    for (const productCandidate of productCandidates) {
+      const productLookup = await lookupByProductId(admin, productCandidate, sku);
+      if (!productLookup?.product) continue;
       productFromProductLookup = productLookup.product;
-      if (!variant) {
-        return { ok: false, message: `Product has no variants to map: ${variantIdInput}` } satisfies ActionResult;
-      }
-    } else {
-      variant = await lookupByVariantId(admin, normalized);
-      if (!variant) {
-        return {
-          ok: false,
-          message: `Variant not found or invalid ID: ${variantIdInput}`,
-        } satisfies ActionResult;
-      }
+      variant = productLookup.id ? { id: productLookup.id, sku: productLookup.sku } : null;
+      break;
+    }
+
+    // Fallback to variant lookup when product lookup doesn't resolve.
+    if (!variant && !productFromProductLookup) {
+      variant = await lookupByVariantId(admin, normalizedVariant);
+    }
+
+    if (!variant && !productFromProductLookup) {
+      return {
+        ok: false,
+        message: `Variant/Product not found or invalid ID: ${variantIdInput}`,
+      } satisfies ActionResult;
     }
 
     await prisma.hvacSkuMapping.update({
       where: { shop_sourceSku: { shop, sourceSku: sku } },
       data: {
-        mappedVariantId: variant.id,
-        mappedVariantSku: norm(variant.sku) || null,
+        mappedVariantId: variant?.id ?? null,
+        mappedVariantSku: variant ? norm(variant.sku) || null : null,
         mappedProductId: variant.product?.id ?? productFromProductLookup?.id ?? null,
         mappedProductTitle: variant.product?.title ?? productFromProductLookup?.title ?? null,
         mappedProductHandle: variant.product?.handle ?? productFromProductLookup?.handle ?? null,
@@ -833,7 +849,7 @@ export default function HvacMappingPage() {
                         <input
                           type="text"
                           name="variant_id"
-                          placeholder="gid://shopify/ProductVariant/..."
+                          placeholder="Product ID or Variant ID (numeric or gid://...)"
                           defaultValue={row.mappedVariantId ?? ""}
                           style={{ width: 320 }}
                         />
