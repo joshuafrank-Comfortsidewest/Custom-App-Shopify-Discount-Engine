@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useMemo, useState } from "react";
-import { useActionData, useFetcher, useLoaderData, useNavigation } from "react-router";
+import { useEffect, useMemo, useState } from "react";
+import { useActionData, useFetcher, useLoaderData, useNavigation, useRevalidator } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
@@ -489,7 +489,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       `SELECT "sourceSku"
        FROM "HvacSkuMapping"
        WHERE "shop" = ?
-         AND ("matchStatus" = 'unmapped' OR "matchStatus" = 'not_found' OR "matchStatus" = 'error')
+         AND ("mappedProductId" IS NULL OR "matchStatus" = 'unmapped' OR "matchStatus" = 'not_found' OR "matchStatus" = 'error')
        ORDER BY "sourceSku" ASC`,
       shop,
     );
@@ -539,6 +539,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (intent === "save_manual_variant") {
     const sku = norm(form.get("sku"));
     const variantIdInput = norm(form.get("variant_id"));
+    const sourceTypeInput = norm(form.get("source_type")).toLowerCase();
+    const sourceType =
+      sourceTypeInput === "indoor" || sourceTypeInput === "outdoor" || sourceTypeInput === "unknown"
+        ? sourceTypeInput
+        : null;
     if (!sku || !variantIdInput) return { ok: false, message: "Missing SKU or ID" } satisfies ActionResult;
 
     let variant: any = null;
@@ -574,11 +579,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         mappedProductTitle: variant.product?.title ?? productFromProductLookup?.title ?? null,
         mappedProductHandle: variant.product?.handle ?? productFromProductLookup?.handle ?? null,
         mappedProductUrl: variant.product?.onlineStoreUrl ?? productFromProductLookup?.onlineStoreUrl ?? null,
+        ...(sourceType ? { sourceType } : {}),
         matchStatus: "manual",
         note: null,
       },
     });
-    return { ok: true, message: `${sku}: manual mapping saved` } satisfies ActionResult;
+    return {
+      ok: true,
+      message:
+        `${sku}: manual mapping saved. Re-open the discount and click Save settings to refresh HVAC runtime IDs for checkout.`,
+    } satisfies ActionResult;
   }
 
   if (intent === "export_json") {
@@ -640,6 +650,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 export default function HvacMappingPage() {
   const data = useLoaderData<typeof loader>();
   const actionData = useActionData<ActionResult>();
+  const revalidator = useRevalidator();
   const importFetcher = useFetcher<ActionResult>();
   const bulkFetcher = useFetcher<ActionResult>();
   const exportFetcher = useFetcher<ActionResult>();
@@ -655,6 +666,25 @@ export default function HvacMappingPage() {
     rowFetcher.state !== "idle";
   const flash =
     rowFetcher.data ?? exportFetcher.data ?? bulkFetcher.data ?? importFetcher.data ?? actionData ?? null;
+
+  useEffect(() => {
+    const shouldRefresh =
+      (importFetcher.state === "idle" && importFetcher.data != null) ||
+      (bulkFetcher.state === "idle" && bulkFetcher.data != null) ||
+      (rowFetcher.state === "idle" && rowFetcher.data != null);
+    if (shouldRefresh && revalidator.state === "idle") {
+      revalidator.revalidate();
+    }
+  }, [
+    importFetcher.state,
+    importFetcher.data,
+    bulkFetcher.state,
+    bulkFetcher.data,
+    rowFetcher.state,
+    rowFetcher.data,
+    revalidator,
+  ]);
+
   const visibleRows = useMemo(() => {
     const q = String(filterSku ?? "").trim().toLowerCase();
     return data.rows.filter((row) => {
@@ -788,6 +818,18 @@ export default function HvacMappingPage() {
                       <rowFetcher.Form method="post">
                         <input type="hidden" name="intent" value="save_manual_variant" />
                         <input type="hidden" name="sku" value={row.sourceSku} />
+                        <select
+                          name="source_type"
+                          defaultValue={
+                            row.sourceType === "indoor" || row.sourceType === "outdoor" || row.sourceType === "unknown"
+                              ? row.sourceType
+                              : "unknown"
+                          }
+                        >
+                          <option value="unknown">unknown</option>
+                          <option value="indoor">indoor</option>
+                          <option value="outdoor">outdoor</option>
+                        </select>
                         <input
                           type="text"
                           name="variant_id"
