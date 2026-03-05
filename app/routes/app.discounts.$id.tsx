@@ -488,10 +488,9 @@ function buildRuntimeFunctionConfig(config: DiscountConfig) {
 
   const runtimeHvacCombinationRules = hvacRuleEnabled
     ? (config.hvac_rule?.combination_rules ?? [])
-        .filter((rule) => Boolean(rule?.enabled))
         .map((rule) => ({
           name: String(rule?.name ?? "").trim(),
-          enabled: true,
+          enabled: Boolean(rule?.enabled),
           outdoor_source_sku: String(rule?.outdoor_source_sku ?? "").trim(),
           min_indoor_per_outdoor: normalizeNum(
             rule?.min_indoor_per_outdoor,
@@ -507,12 +506,6 @@ function buildRuntimeFunctionConfig(config: DiscountConfig) {
           stack_mode: rule?.stack_mode === "exclusive_best" ? "exclusive_best" : "stackable",
           outdoor_product_ids: compactProductIds(rule?.outdoor_product_ids),
         }))
-        .filter(
-          (rule) =>
-            rule.outdoor_product_ids.length > 0 &&
-            rule.indoor_product_ids.length > 0 &&
-            (rule.percent_off_hvac_products > 0 || rule.amount_off_outdoor_per_bundle > 0),
-        )
     : [];
 
   const runtimeHvacRule = {
@@ -1601,12 +1594,37 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     0,
     Math.trunc(toNum(fd.get("hvac_combo_rule_count"), 0)),
   );
-  // Rebuild rules from named form fields to avoid stale hidden-JSON state.
-  const hasHvacComboInputs = fd.has("hvac_combo_rule_count");
-  const comboRuleCount = comboRuleCountFromForm;
+  const hvacComboRulesJsonRawEncoded = String(fd.get("hvac_combo_rules_json") ?? "").trim();
+  const hvacComboRulesJsonRaw = hvacComboRulesJsonRawEncoded
+    ? (() => {
+        try {
+          return decodeURIComponent(hvacComboRulesJsonRawEncoded);
+        } catch {
+          return hvacComboRulesJsonRawEncoded;
+        }
+      })()
+    : "";
+  let hvacComboRulesFromJson: Array<any> | null = null;
+  if (hvacComboRulesJsonRaw) {
+    try {
+      const parsed = JSON.parse(hvacComboRulesJsonRaw);
+      if (Array.isArray(parsed)) {
+        hvacComboRulesFromJson = parsed;
+      }
+    } catch {
+      hvacComboRulesFromJson = null;
+    }
+  }
+  const hasHvacComboFieldInputs =
+    comboRuleCountFromForm === 0 || fd.has("hvac_combo_name_0") || fd.has("hvac_combo_outdoor_sku_0");
+  const hasHvacComboInputs =
+    hasHvacComboFieldInputs || (Array.isArray(hvacComboRulesFromJson) && hvacComboRulesFromJson.length > 0);
+  const comboRuleCount = hasHvacComboFieldInputs
+    ? comboRuleCountFromForm
+    : hvacComboRulesFromJson?.length ?? 0;
   const hvacCombinationRules: HvacCombinationRule[] = [];
   for (let i = 0; i < comboRuleCount; i += 1) {
-    const jsonRule = null;
+    const jsonRule = hasHvacComboFieldInputs ? null : hvacComboRulesFromJson?.[i] ?? null;
     const outdoorSourceSku = String(
       jsonRule?.outdoor_source_sku ?? fd.get(`hvac_combo_outdoor_sku_${i}`) ?? "",
     ).trim();
@@ -2321,22 +2339,46 @@ export default function DiscountDetailsRoute() {
                       const rule = hvacComboRules[i];
                       const ruleUiId = rule.__ui_id || String(i);
                       const isEditing = editingHvacRuleId === ruleUiId;
+                      const selectedBrand = String(rule.combo_brand || "").trim();
+                      const selectedOutdoorSku = String(rule.outdoor_source_sku || "").trim();
+                      const outdoorMeta = hvacOutdoorOptions.find(
+                        (opt: any) => String(opt?.sourceSku ?? "").trim() === selectedOutdoorSku,
+                      );
+                      const selectedOutdoorFallback =
+                        selectedOutdoorSku &&
+                        !hvacOutdoorOptions.some(
+                          (opt: any) => String(opt?.sourceSku ?? "").trim() === selectedOutdoorSku,
+                        )
+                          ? [
+                              {
+                                sourceSku: selectedOutdoorSku,
+                                mappedProductId: null,
+                                mappedProductTitle: null,
+                                sourceBrand: selectedBrand || null,
+                                sourceSeries: null,
+                                sourceSystem: null,
+                                sourceRefrigerant: null,
+                                sourceBtu: null,
+                              },
+                            ]
+                          : [];
+                      const outdoorOptionsWithFallback = [
+                        ...hvacOutdoorOptions,
+                        ...selectedOutdoorFallback,
+                      ];
                       const availableBrands = Array.from(
                         new Set(
-                          hvacOutdoorOptions
+                          outdoorOptionsWithFallback
                             .map((o: any) => String(o?.sourceBrand ?? "").trim())
+                            .concat(selectedBrand ? [selectedBrand] : [])
                             .filter(Boolean),
                         ),
                       ).sort((a, b) => a.localeCompare(b));
-                      const selectedBrand = rule.combo_brand || "";
                       const outdoorOptionsForBrand = selectedBrand
-                        ? hvacOutdoorOptions.filter(
+                        ? outdoorOptionsWithFallback.filter(
                             (o: any) => String(o?.sourceBrand ?? "").trim() === selectedBrand,
                           )
-                        : hvacOutdoorOptions;
-                      const outdoorMeta = hvacOutdoorOptions.find(
-                        (opt: any) => opt.sourceSku === rule.outdoor_source_sku,
-                      );
+                        : outdoorOptionsWithFallback;
                       const constraint = outdoorCatalogConstraints[rule.outdoor_source_sku];
                       const brand = String(selectedBrand || outdoorMeta?.sourceBrand || "").trim();
                       const outdoorRefrigerant = String(outdoorMeta?.sourceRefrigerant ?? "").trim();
