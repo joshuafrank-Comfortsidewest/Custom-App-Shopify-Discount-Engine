@@ -600,35 +600,57 @@ async function persistConfig(
     }
   }
 
-  const response = await admin.graphql(
-    `#graphql
-    mutation m($metafields: [MetafieldsSetInput!]!) {
-      metafieldsSet(metafields: $metafields) { userErrors { field message } }
-    }`,
-    {
-      variables: {
-        metafields: [
-          ...runtimeMetafields,
-          {
-            ownerId: cleanedOwnerId,
-            namespace: "$app",
-            key: ADMIN_CONFIG_KEY,
-            type: "json",
-            value: payload,
-          },
-        ],
-      },
-    },
-  );
+  const setMetafields = async (metafields: Array<{
+    ownerId: string;
+    namespace: string;
+    key: string;
+    type: string;
+    value: string;
+  }>) => {
+    const response = await admin.graphql(
+      `#graphql
+      mutation m($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) { userErrors { field message } }
+      }`,
+      { variables: { metafields } },
+    );
+    return response.json();
+  };
 
-  const json = await response.json();
-  const userErrors = (json?.data?.metafieldsSet?.userErrors ?? []).map((e: any) => ({
-    field: Array.isArray(e?.field) ? e.field : ["metafieldsSet"],
-    message: String(e?.message ?? "Unknown error"),
-  }));
-  for (const e of json?.errors ?? []) {
+  const userErrors: Array<{ field: string[]; message: string }> = [];
+
+  const adminJson = await setMetafields([
+    {
+      ownerId: cleanedOwnerId,
+      namespace: "$app",
+      key: ADMIN_CONFIG_KEY,
+      type: "json",
+      value: payload,
+    },
+  ]);
+  for (const e of adminJson?.data?.metafieldsSet?.userErrors ?? []) {
+    userErrors.push({
+      field: Array.isArray(e?.field) ? e.field : ["adminConfiguration"],
+      message: String(e?.message ?? "Unknown error"),
+    });
+  }
+  for (const e of adminJson?.errors ?? []) {
     userErrors.push({ field: ["graphql"], message: String(e?.message ?? "GraphQL error") });
   }
+
+  if (runtimeMetafields.length > 0) {
+    const runtimeJson = await setMetafields(runtimeMetafields);
+    for (const e of runtimeJson?.data?.metafieldsSet?.userErrors ?? []) {
+      userErrors.push({
+        field: Array.isArray(e?.field) ? e.field : ["runtimeConfiguration"],
+        message: String(e?.message ?? "Unknown error"),
+      });
+    }
+    for (const e of runtimeJson?.errors ?? []) {
+      userErrors.push({ field: ["graphql"], message: String(e?.message ?? "GraphQL error") });
+    }
+  }
+
   if (runtimeWarning) {
     userErrors.push({ field: ["runtime"], message: runtimeWarning });
   }
