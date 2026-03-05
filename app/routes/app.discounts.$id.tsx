@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { useActionData, useFetcher, useLoaderData, useNavigation } from "react-router";
@@ -2220,34 +2220,83 @@ export default function DiscountDetailsRoute() {
   const [autoTagJob, setAutoTagJob] = useState<AutoTagJobStatus | null>(
     (activeAutoTagJob as AutoTagJobStatus | null) ?? null,
   );
+  const autoTagPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoTagFetcherStateRef = useRef(autoTagJobFetcher.state);
+  const autoTagSubmitRef = useRef(autoTagJobFetcher.submit);
+  const mergeIncomingAutoTagJob = (incoming: AutoTagJobStatus | null | undefined) => {
+    if (!incoming?.id) return;
+    setAutoTagJob((previous) => {
+      if (!previous) return incoming;
+      if (previous.status === "running" && incoming.id !== previous.id) return previous;
+      if (previous.id !== incoming.id) return incoming;
+      const previousUpdatedMs = Date.parse(String(previous.updatedAt ?? ""));
+      const incomingUpdatedMs = Date.parse(String(incoming.updatedAt ?? ""));
+      if (
+        Number.isFinite(previousUpdatedMs) &&
+        Number.isFinite(incomingUpdatedMs) &&
+        incomingUpdatedMs < previousUpdatedMs
+      ) {
+        return previous;
+      }
+      // Never regress from a terminal state to running due to stale responses.
+      if (previous.status !== "running" && incoming.status === "running") return previous;
+      return {
+        ...incoming,
+        totalCount: Math.max(previous.totalCount, incoming.totalCount),
+        processedCount: Math.max(previous.processedCount, incoming.processedCount),
+        changedCount: Math.max(previous.changedCount, incoming.changedCount),
+        skippedProtectedCount: Math.max(
+          previous.skippedProtectedCount,
+          incoming.skippedProtectedCount,
+        ),
+        errorCount: Math.max(previous.errorCount, incoming.errorCount),
+      };
+    });
+  };
   useEffect(() => {
     const nextTab = String((actionData as any)?.activeTab ?? "");
     if (nextTab === "autoTags") setTab("autoTags");
   }, [actionData]);
   useEffect(() => {
-    setAutoTagJob((activeAutoTagJob as AutoTagJobStatus | null) ?? null);
+    mergeIncomingAutoTagJob((activeAutoTagJob as AutoTagJobStatus | null) ?? null);
   }, [activeAutoTagJob]);
   useEffect(() => {
     const actionJob = (actionData as any)?.autoTagJob as AutoTagJobStatus | undefined;
-    if (actionJob?.id) setAutoTagJob(actionJob);
+    mergeIncomingAutoTagJob(actionJob);
   }, [actionData]);
   useEffect(() => {
     const fetcherJob = (autoTagJobFetcher.data as any)?.autoTagJob as AutoTagJobStatus | undefined;
-    if (fetcherJob?.id) setAutoTagJob(fetcherJob);
+    mergeIncomingAutoTagJob(fetcherJob);
   }, [autoTagJobFetcher.data]);
   useEffect(() => {
+    autoTagFetcherStateRef.current = autoTagJobFetcher.state;
+  }, [autoTagJobFetcher.state]);
+  useEffect(() => {
+    autoTagSubmitRef.current = autoTagJobFetcher.submit;
+  }, [autoTagJobFetcher.submit]);
+  useEffect(() => {
+    if (autoTagPollTimerRef.current) {
+      clearTimeout(autoTagPollTimerRef.current);
+      autoTagPollTimerRef.current = null;
+    }
     if (!autoTagJob?.id || autoTagJob.status !== "running") return;
     const runPoll = () => {
-      if (autoTagJobFetcher.state !== "idle") return;
-      const fd = new FormData();
-      fd.set("intent", "auto_tag_job_poll");
-      fd.set("auto_tag_job_id", autoTagJob.id);
-      autoTagJobFetcher.submit(fd, { method: "post" });
+      if (autoTagFetcherStateRef.current === "idle") {
+        const fd = new FormData();
+        fd.set("intent", "auto_tag_job_poll");
+        fd.set("auto_tag_job_id", autoTagJob.id);
+        autoTagSubmitRef.current(fd, { method: "post" });
+      }
+      autoTagPollTimerRef.current = setTimeout(runPoll, 2500);
     };
     runPoll();
-    const timer = setInterval(runPoll, 2500);
-    return () => clearInterval(timer);
-  }, [autoTagJob?.id, autoTagJob?.status, autoTagJobFetcher, autoTagJobFetcher.state]);
+    return () => {
+      if (autoTagPollTimerRef.current) {
+        clearTimeout(autoTagPollTimerRef.current);
+        autoTagPollTimerRef.current = null;
+      }
+    };
+  }, [autoTagJob?.id, autoTagJob?.status]);
   const cardStyle: CSSProperties = {
     border: "1px solid rgba(17,24,39,0.12)",
     borderRadius: 12,
