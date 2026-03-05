@@ -374,6 +374,8 @@ const FUNCTION_CONFIG_KEY = "function-configuration";
 const ADMIN_CONFIG_KEY = "admin-configuration";
 const FUNCTION_CONFIG_CHUNK_KEY_PREFIX = "function-configuration-part-";
 const FUNCTION_CONFIG_MAX_CHUNKS = 4;
+const ADMIN_CONFIG_CHUNK_KEY_PREFIX = "admin-configuration-part-";
+const ADMIN_CONFIG_MAX_CHUNKS = 8;
 
 function splitUtf8ByBytes(input: string, maxBytes: number): string[] {
   if (maxBytes <= 0) return [input];
@@ -393,6 +395,31 @@ function splitUtf8ByBytes(input: string, maxBytes: number): string[] {
   }
   if (current) chunks.push(current);
   return chunks.length ? chunks : [""];
+}
+
+function resolveChunkedConfigJson(
+  primary: string | null | undefined,
+  chunks: Array<string | null | undefined>,
+): string | null {
+  const primaryRaw = String(primary ?? "").trim();
+  if (!primaryRaw) return null;
+  try {
+    const parsed = JSON.parse(primaryRaw) as { chunked?: boolean; parts?: number };
+    if (parsed?.chunked) {
+      const parts = Math.max(0, Math.min(Number(parsed?.parts ?? 0), chunks.length));
+      if (parts <= 0) return null;
+      let joined = "";
+      for (let i = 0; i < parts; i += 1) {
+        const part = String(chunks[i] ?? "");
+        if (!part) return null;
+        joined += part;
+      }
+      return joined || null;
+    }
+  } catch {
+    // Primary value is plain JSON config; return as-is.
+  }
+  return primaryRaw;
 }
 
 function compactProductId(value: unknown): string {
@@ -596,7 +623,47 @@ async function persistConfig(
     type: string;
     value: string;
   }> = [];
+  const adminMetafields: Array<{
+    ownerId: string;
+    namespace: string;
+    key: string;
+    type: string;
+    value: string;
+  }> = [];
+  let adminWarning: string | null = null;
   let runtimeWarning: string | null = null;
+  const adminBytes = Buffer.byteLength(payload, "utf8");
+  if (adminBytes <= FUNCTION_CONFIG_MAX_BYTES) {
+    adminMetafields.push({
+      ownerId: cleanedOwnerId,
+      namespace: "$app",
+      key: ADMIN_CONFIG_KEY,
+      type: "json",
+      value: payload,
+    });
+  } else {
+    const chunks = splitUtf8ByBytes(payload, FUNCTION_CONFIG_MAX_BYTES);
+    if (chunks.length > ADMIN_CONFIG_MAX_CHUNKS) {
+      adminWarning = `Admin settings are too large (${adminBytes} bytes). Reduce Auto Tagging history or number of very large rules, then save again.`;
+    } else {
+      adminMetafields.push({
+        ownerId: cleanedOwnerId,
+        namespace: "$app",
+        key: ADMIN_CONFIG_KEY,
+        type: "json",
+        value: JSON.stringify({ chunked: true, parts: chunks.length }),
+      });
+      chunks.forEach((chunk, idx) => {
+        adminMetafields.push({
+          ownerId: cleanedOwnerId,
+          namespace: "$app",
+          key: `${ADMIN_CONFIG_CHUNK_KEY_PREFIX}${idx + 1}`,
+          type: "multi_line_text_field",
+          value: chunk,
+        });
+      });
+    }
+  }
   if (!skipRuntime) {
     const runtimeBytes = Buffer.byteLength(runtimePayload, "utf8");
 
@@ -653,23 +720,20 @@ async function persistConfig(
 
   const userErrors: Array<{ field: string[]; message: string }> = [];
 
-  const adminJson = await setMetafields([
-    {
-      ownerId: cleanedOwnerId,
-      namespace: "$app",
-      key: ADMIN_CONFIG_KEY,
-      type: "json",
-      value: payload,
-    },
-  ]);
-  for (const e of adminJson?.data?.metafieldsSet?.userErrors ?? []) {
-    userErrors.push({
-      field: Array.isArray(e?.field) ? e.field : ["adminConfiguration"],
-      message: String(e?.message ?? "Unknown error"),
-    });
+  if (adminMetafields.length > 0) {
+    const adminJson = await setMetafields(adminMetafields);
+    for (const e of adminJson?.data?.metafieldsSet?.userErrors ?? []) {
+      userErrors.push({
+        field: Array.isArray(e?.field) ? e.field : ["adminConfiguration"],
+        message: String(e?.message ?? "Unknown error"),
+      });
+    }
+    for (const e of adminJson?.errors ?? []) {
+      userErrors.push({ field: ["graphql"], message: String(e?.message ?? "GraphQL error") });
+    }
   }
-  for (const e of adminJson?.errors ?? []) {
-    userErrors.push({ field: ["graphql"], message: String(e?.message ?? "GraphQL error") });
+  if (adminWarning) {
+    userErrors.push({ field: ["admin"], message: adminWarning });
   }
 
   if (runtimeMetafields.length > 0) {
@@ -705,6 +769,14 @@ async function loadDiscountOwnersAndConfig(admin: any, discountGid: string) {
         discountNode(id: $id) {
           id
           adminConfiguration: metafield(namespace: "$app", key: "admin-configuration") { value }
+          adminConfigurationPart1: metafield(namespace: "$app", key: "admin-configuration-part-1") { value }
+          adminConfigurationPart2: metafield(namespace: "$app", key: "admin-configuration-part-2") { value }
+          adminConfigurationPart3: metafield(namespace: "$app", key: "admin-configuration-part-3") { value }
+          adminConfigurationPart4: metafield(namespace: "$app", key: "admin-configuration-part-4") { value }
+          adminConfigurationPart5: metafield(namespace: "$app", key: "admin-configuration-part-5") { value }
+          adminConfigurationPart6: metafield(namespace: "$app", key: "admin-configuration-part-6") { value }
+          adminConfigurationPart7: metafield(namespace: "$app", key: "admin-configuration-part-7") { value }
+          adminConfigurationPart8: metafield(namespace: "$app", key: "admin-configuration-part-8") { value }
           canonicalConfiguration: metafield(namespace: "$app", key: "function-configuration") { value }
           functionConfiguration: metafield(key: "function-configuration") { value }
           appMetafield: metafield(namespace: "$app:smart_discount_engine", key: "config") { value }
@@ -727,8 +799,18 @@ async function loadDiscountOwnersAndConfig(admin: any, discountGid: string) {
   const nodeId = String(node?.id ?? "").trim();
   const discountType = String(node?.discount?.__typename ?? "").trim();
   const discountId = String(node?.discount?.discountId ?? "").trim();
+  const adminConfigRaw = resolveChunkedConfigJson(node?.adminConfiguration?.value, [
+    node?.adminConfigurationPart1?.value,
+    node?.adminConfigurationPart2?.value,
+    node?.adminConfigurationPart3?.value,
+    node?.adminConfigurationPart4?.value,
+    node?.adminConfigurationPart5?.value,
+    node?.adminConfigurationPart6?.value,
+    node?.adminConfigurationPart7?.value,
+    node?.adminConfigurationPart8?.value,
+  ]);
   const configRaw =
-    node?.adminConfiguration?.value ??
+    adminConfigRaw ??
     node?.canonicalConfiguration?.value ??
     node?.functionConfiguration?.value ??
     node?.appMetafield?.value ??
@@ -744,6 +826,14 @@ async function loadShopConfig(admin: any) {
         shop {
           id
           adminConfiguration: metafield(namespace: "$app", key: "admin-configuration") { value }
+          adminConfigurationPart1: metafield(namespace: "$app", key: "admin-configuration-part-1") { value }
+          adminConfigurationPart2: metafield(namespace: "$app", key: "admin-configuration-part-2") { value }
+          adminConfigurationPart3: metafield(namespace: "$app", key: "admin-configuration-part-3") { value }
+          adminConfigurationPart4: metafield(namespace: "$app", key: "admin-configuration-part-4") { value }
+          adminConfigurationPart5: metafield(namespace: "$app", key: "admin-configuration-part-5") { value }
+          adminConfigurationPart6: metafield(namespace: "$app", key: "admin-configuration-part-6") { value }
+          adminConfigurationPart7: metafield(namespace: "$app", key: "admin-configuration-part-7") { value }
+          adminConfigurationPart8: metafield(namespace: "$app", key: "admin-configuration-part-8") { value }
           canonicalConfiguration: metafield(namespace: "$app", key: "function-configuration") { value }
           functionConfiguration: metafield(key: "function-configuration") { value }
           appMetafield: metafield(namespace: "$app:smart_discount_engine", key: "config") { value }
@@ -754,8 +844,18 @@ async function loadShopConfig(admin: any) {
   const json = await response.json();
   const shop = json?.data?.shop;
   const shopId = String(shop?.id ?? "").trim();
+  const adminConfigRaw = resolveChunkedConfigJson(shop?.adminConfiguration?.value, [
+    shop?.adminConfigurationPart1?.value,
+    shop?.adminConfigurationPart2?.value,
+    shop?.adminConfigurationPart3?.value,
+    shop?.adminConfigurationPart4?.value,
+    shop?.adminConfigurationPart5?.value,
+    shop?.adminConfigurationPart6?.value,
+    shop?.adminConfigurationPart7?.value,
+    shop?.adminConfigurationPart8?.value,
+  ]);
   const configRaw =
-    shop?.adminConfiguration?.value ??
+    adminConfigRaw ??
     shop?.canonicalConfiguration?.value ??
     shop?.functionConfiguration?.value ??
     shop?.appMetafield?.value ??
