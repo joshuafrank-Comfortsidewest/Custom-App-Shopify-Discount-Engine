@@ -10,7 +10,7 @@ generator client {
 // See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
 datasource db {
   provider = "sqlite"
-  url      = "file:dev.sqlite"
+  url      = env("DATABASE_URL")
 }
 
 model Session {
@@ -56,4 +56,28 @@ model HvacSkuMapping {
 
   @@unique([shop, sourceSku])
   @@index([shop, matchStatus])
+}
+
+model AutoTagJob {
+  id                  String   @id @default(cuid())
+  shop                String
+  discountNodeId      String
+  status              String   @default("running") // running|completed|failed|cancelled
+  mode                String   // tag|untag_discount
+  targetTag           String?
+  scheduledUndoAt     String?
+  inputSkusJson       String   // JSON string array
+  matchedProductsJson String   // JSON [{id,title,tags[]},...]
+  changesJson         String   @default("[]")
+  errorsJson          String   @default("[]")
+  cursor              Int      @default(0)
+  processedCount      Int      @default(0)
+  totalCount          Int      @default(0)
+  changedCount        Int      @default(0)
+  skippedProtectedCount Int    @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([shop, discountNodeId, status])
+  @@index([shop, createdAt])
 }

@@ -4,4 +4,4 @@ webhooks_path = "/webhooks/app/uninstalled"
 
 [commands]
 predev = "node scripts/prisma-generate-safe.mjs"
-dev = "npx prisma migrate deploy && npm exec react-router dev"
+dev = "node scripts/prisma-migrate-safe.mjs && npm exec react-router dev"

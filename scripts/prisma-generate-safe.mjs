@@ -3,6 +3,11 @@ import { spawnSync } from "node:child_process";
 
 const ENGINE_PATH = "node_modules/.prisma/client/query_engine-windows.dll.node";
 const CLIENT_INDEX_PATH = "node_modules/.prisma/client/index.js";
+const DEFAULT_DATABASE_URL = "file:dev.sqlite";
+
+if (!process.env.DATABASE_URL) {
+  process.env.DATABASE_URL = DEFAULT_DATABASE_URL;
+}
 
 const hasGeneratedClient = () => existsSync(ENGINE_PATH) && existsSync(CLIENT_INDEX_PATH);
 

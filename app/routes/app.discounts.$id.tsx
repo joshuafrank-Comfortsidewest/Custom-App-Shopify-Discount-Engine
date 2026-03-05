@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useActionData, useLoaderData, useNavigation } from "react-router";
+import { useActionData, useFetcher, useLoaderData, useNavigation } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import fs from "node:fs";
@@ -18,6 +18,21 @@ type AutoTagHistoryEntry = {
   changes: AutoTagChange[];
   scheduled_undo_at: string | null;
   undone_at: string | null;
+};
+type AutoTagProductSnapshot = { id: string; title: string; tags: string[]; variantSkus: string[] };
+type AutoTagJobStatus = {
+  id: string;
+  status: "running" | "completed" | "failed" | "cancelled";
+  mode: "tag" | "untag_discount";
+  targetTag: string;
+  processedCount: number;
+  totalCount: number;
+  changedCount: number;
+  skippedProtectedCount: number;
+  errorCount: number;
+  createdAt: string;
+  updatedAt: string;
+  message: string;
 };
 type RuleState = "any" | "active" | "inactive";
 type ActivationMode =
@@ -280,6 +295,260 @@ const parseRequestedSkuTokens = (raw: unknown) =>
     .filter(Boolean);
 const isNumericOffTag = (tag: string) => /^\d+\s*off$/i.test(String(tag ?? "").trim());
 const randomId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+const AUTO_TAG_JOB_BATCH_SIZE = 20;
+const AUTO_TAG_JOB_MAX_HISTORY_CHANGES = 250;
+const AUTO_TAG_JOB_MAX_ERRORS = 120;
+const autoTagRunningJobs = new Set<string>();
+
+const parseStringArray = (raw: string | null | undefined) => {
+  try {
+    const parsed = JSON.parse(String(raw ?? "[]"));
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((v) => String(v ?? ""));
+  } catch {
+    return [];
+  }
+};
+
+const parseAutoTagChanges = (raw: string | null | undefined) => {
+  try {
+    const parsed = JSON.parse(String(raw ?? "[]"));
+    if (!Array.isArray(parsed)) return [] as AutoTagChange[];
+    return parsed
+      .map((entry: any) => ({
+        product_id: String(entry?.product_id ?? "").trim(),
+        product_title: String(entry?.product_title ?? "").trim(),
+        added_tags: Array.isArray(entry?.added_tags)
+          ? entry.added_tags.map((v: any) => String(v ?? "").trim()).filter(Boolean)
+          : [],
+        removed_tags: Array.isArray(entry?.removed_tags)
+          ? entry.removed_tags.map((v: any) => String(v ?? "").trim()).filter(Boolean)
+          : [],
+      }))
+      .filter((entry) => Boolean(entry.product_id));
+  } catch {
+    return [] as AutoTagChange[];
+  }
+};
+
+const parseAutoTagMatchedProducts = (raw: string | null | undefined) => {
+  try {
+    const parsed = JSON.parse(String(raw ?? "[]"));
+    if (!Array.isArray(parsed)) return [] as AutoTagProductSnapshot[];
+    return parsed
+      .map((entry: any) => ({
+        id: String(entry?.id ?? "").trim(),
+        title: String(entry?.title ?? "").trim(),
+        tags: Array.isArray(entry?.tags)
+          ? entry.tags.map((v: any) => String(v ?? "").trim()).filter(Boolean)
+          : [],
+        variantSkus: Array.isArray(entry?.variantSkus)
+          ? entry.variantSkus.map((v: any) => String(v ?? "").trim()).filter(Boolean)
+          : [],
+      }))
+      .filter((entry) => Boolean(entry.id));
+  } catch {
+    return [] as AutoTagProductSnapshot[];
+  }
+};
+
+const toAutoTagJobStatus = (job: {
+  id: string;
+  status: string;
+  mode: string;
+  targetTag: string | null;
+  processedCount: number;
+  totalCount: number;
+  changedCount: number;
+  skippedProtectedCount: number;
+  errorsJson: string;
+  createdAt: Date;
+  updatedAt: Date;
+}) =>
+  ({
+    id: job.id,
+    status: (job.status || "running") as AutoTagJobStatus["status"],
+    mode: (job.mode || "tag") as AutoTagJobStatus["mode"],
+    targetTag: String(job.targetTag ?? ""),
+    processedCount: Number(job.processedCount ?? 0),
+    totalCount: Number(job.totalCount ?? 0),
+    changedCount: Number(job.changedCount ?? 0),
+    skippedProtectedCount: Number(job.skippedProtectedCount ?? 0),
+    errorCount: parseStringArray(job.errorsJson).length,
+    createdAt: job.createdAt.toISOString(),
+    updatedAt: job.updatedAt.toISOString(),
+    message: "",
+  }) satisfies AutoTagJobStatus;
+
+async function processAutoTagJob(
+  admin: any,
+  shop: string,
+  configOwnerId: string,
+  jobId: string,
+) {
+  if (!jobId || autoTagRunningJobs.has(jobId)) return;
+  autoTagRunningJobs.add(jobId);
+  try {
+    while (true) {
+      const job = await prisma.autoTagJob.findUnique({ where: { id: jobId } });
+      if (!job) break;
+      if (job.status !== "running") break;
+
+      const matched = parseAutoTagMatchedProducts(job.matchedProductsJson);
+      const totalCount = Math.max(0, Number(job.totalCount ?? matched.length));
+      const cursor = Math.max(0, Number(job.cursor ?? 0));
+      if (cursor >= totalCount || matched.length === 0) {
+        const changes = parseAutoTagChanges(job.changesJson);
+        const inputSkus = parseStringArray(job.inputSkusJson);
+        const operationErrors = parseStringArray(job.errorsJson);
+        const [meta, shopMeta] = await Promise.all([
+          loadDiscountOwnersAndConfig(admin, configOwnerId),
+          loadShopConfig(admin),
+        ]);
+        const currentConfig = parseConfig(meta.configRaw ?? shopMeta.configRaw);
+        const entry: AutoTagHistoryEntry = {
+          id: randomId(),
+          created_at: new Date().toISOString(),
+          mode: job.mode === "untag_discount" ? "untag_discount" : "tag",
+          input_skus: inputSkus,
+          target_tag: String(job.targetTag ?? ""),
+          changes,
+          scheduled_undo_at: job.scheduledUndoAt,
+          undone_at: null,
+        };
+        const nextConfig: DiscountConfig = {
+          ...currentConfig,
+          auto_tagging: {
+            history: [entry, ...(currentConfig.auto_tagging?.history ?? [])].slice(0, 30),
+          },
+        };
+        const persistJson = await persistConfig(admin, configOwnerId, nextConfig, { skipRuntime: true });
+        const persistErrors = (persistJson?.data?.metafieldsSet?.userErrors ?? []).map((e: any) =>
+          String(e?.message ?? "Failed to save settings"),
+        );
+        const allErrors = Array.from(new Set([...operationErrors, ...persistErrors]));
+        const status = allErrors.length > 0 ? "failed" : "completed";
+        await prisma.autoTagJob.update({
+          where: { id: jobId },
+          data: {
+            status,
+            errorsJson: JSON.stringify(allErrors.slice(0, AUTO_TAG_JOB_MAX_ERRORS)),
+          },
+        });
+        break;
+      }
+
+      const hvacProtectedIds = await hvacProtectedProductIds(shop);
+      const discountTagTarget =
+        job.mode === "tag" ? isNumericOffTag(String(job.targetTag ?? "")) : false;
+      const start = cursor;
+      const end = Math.min(totalCount, start + AUTO_TAG_JOB_BATCH_SIZE);
+      const chunk = matched.slice(start, end);
+
+      let changedCountDelta = 0;
+      let skippedProtectedDelta = 0;
+      const chunkChanges: AutoTagChange[] = [];
+      const chunkErrors: string[] = [];
+      for (const product of chunk) {
+        const productTags = new Set(
+          (Array.isArray(product.tags) ? product.tags : [])
+            .map((tag) => String(tag ?? "").trim())
+            .filter(Boolean),
+        );
+        const added: string[] = [];
+        const removed: string[] = [];
+
+        if (job.mode === "tag") {
+          const targetTag = String(job.targetTag ?? "").trim();
+          if (!targetTag) continue;
+          if (discountTagTarget && hvacProtectedIds.has(product.id)) {
+            skippedProtectedDelta += 1;
+            continue;
+          }
+
+          if (discountTagTarget) {
+            const existingOffTags = Array.from(productTags).filter(isNumericOffTag);
+            if (existingOffTags.length > 0) {
+              const errs = await tagsRemove(admin, product.id, existingOffTags);
+              if (errs.length) {
+                chunkErrors.push(...errs.map((msg) => `${product.title}: ${msg}`));
+              } else {
+                for (const tag of existingOffTags) productTags.delete(tag);
+                removed.push(...existingOffTags);
+              }
+            }
+          }
+
+          const hasTarget = Array.from(productTags).some(
+            (tag) => tag.toLowerCase() === targetTag.toLowerCase(),
+          );
+          if (!hasTarget) {
+            const errs = await tagsAdd(admin, product.id, [targetTag]);
+            if (errs.length) {
+              chunkErrors.push(...errs.map((msg) => `${product.title}: ${msg}`));
+            } else {
+              productTags.add(targetTag);
+              added.push(targetTag);
+            }
+          }
+        } else {
+          const removeTargets = Array.from(productTags).filter(isNumericOffTag);
+          if (removeTargets.length > 0) {
+            const errs = await tagsRemove(admin, product.id, removeTargets);
+            if (errs.length) {
+              chunkErrors.push(...errs.map((msg) => `${product.title}: ${msg}`));
+            } else {
+              for (const tag of removeTargets) productTags.delete(tag);
+              removed.push(...removeTargets);
+            }
+          }
+        }
+
+        if (added.length || removed.length) {
+          changedCountDelta += 1;
+          chunkChanges.push({
+            product_id: product.id,
+            product_title: product.title,
+            added_tags: added,
+            removed_tags: removed,
+          });
+        }
+      }
+
+      const previousChanges = parseAutoTagChanges(job.changesJson);
+      const nextChanges = [...previousChanges, ...chunkChanges].slice(0, AUTO_TAG_JOB_MAX_HISTORY_CHANGES);
+      const previousErrors = parseStringArray(job.errorsJson);
+      const nextErrors = [...previousErrors, ...chunkErrors].slice(0, AUTO_TAG_JOB_MAX_ERRORS);
+
+      await prisma.autoTagJob.update({
+        where: { id: jobId },
+        data: {
+          cursor: end,
+          processedCount: end,
+          changedCount: Number(job.changedCount ?? 0) + changedCountDelta,
+          skippedProtectedCount: Number(job.skippedProtectedCount ?? 0) + skippedProtectedDelta,
+          changesJson: JSON.stringify(nextChanges),
+          errorsJson: JSON.stringify(nextErrors),
+        },
+      });
+    }
+  } catch (error: any) {
+    const message = String(error?.message ?? error ?? "Unknown error");
+    const job = await prisma.autoTagJob.findUnique({ where: { id: jobId } });
+    if (job) {
+      const existingErrors = parseStringArray(job.errorsJson);
+      await prisma.autoTagJob.update({
+        where: { id: jobId },
+        data: {
+          status: "failed",
+          errorsJson: JSON.stringify([...existingErrors, message].slice(0, AUTO_TAG_JOB_MAX_ERRORS)),
+        },
+      });
+    }
+  } finally {
+    autoTagRunningJobs.delete(jobId);
+  }
+}
 async function hvacProtectedProductIds(shop: string) {
   const rows = (await prisma.$queryRawUnsafe(
     `SELECT DISTINCT "mappedProductId"
@@ -1159,6 +1428,14 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   }>;
   const outdoorCatalogConstraints = loadOutdoorCatalogConstraints();
   const config = parseConfig(discountMeta.configRaw ?? shopMeta.configRaw);
+  const configOwnerId = String(discountMeta.nodeId || discountGid || "").trim();
+  const activeAutoTagJobRow = configOwnerId
+    ? await prisma.autoTagJob.findFirst({
+        where: { shop: session.shop, discountNodeId: configOwnerId, status: "running" },
+        orderBy: { createdAt: "desc" },
+      })
+    : null;
+  const activeAutoTagJob = activeAutoTagJobRow ? toAutoTagJobStatus(activeAutoTagJobRow) : null;
   return {
     id,
     config,
@@ -1167,6 +1444,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     hvacOutdoorOptions,
     hvacIndoorOptions,
     outdoorCatalogConstraints,
+    activeAutoTagJob,
   };
 };
 
@@ -1202,9 +1480,20 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       return { ok: false, message: "Enter a tag name to apply." };
     }
 
+    const existingRunning = await prisma.autoTagJob.findFirst({
+      where: { shop: session.shop, discountNodeId: configOwnerId, status: "running" },
+      orderBy: { createdAt: "desc" },
+    });
+    if (existingRunning) {
+      return {
+        ok: false,
+        message: "An auto-tag job is already running. Wait for it to finish.",
+        activeTab: "autoTags",
+        autoTagJob: toAutoTagJobStatus(existingRunning),
+      };
+    }
+
     const products = await listProductsForTagging(admin);
-    const hvacProtectedIds = await hvacProtectedProductIds(session.shop);
-    const discountTagTarget = mode === "tag" ? isNumericOffTag(targetTag) : false;
     const tokenSet = new Set(inputSkus.map((s) => s.toUpperCase()));
     const matched = products.filter((p) => {
       const variantTokens = new Set(
@@ -1213,124 +1502,74 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       for (const t of tokenSet) if (variantTokens.has(t)) return true;
       return false;
     });
-
-    const changes: AutoTagChange[] = [];
-    const operationErrors: string[] = [];
-    let skippedProtected = 0;
-    for (const p of matched) {
-      const added: string[] = [];
-      const removed: string[] = [];
-      if (mode === "tag") {
-        if (discountTagTarget && hvacProtectedIds.has(p.id)) {
-          skippedProtected += 1;
-          continue;
-        }
-        if (discountTagTarget) {
-          const existingOffTags = p.tags.filter(isNumericOffTag);
-          if (existingOffTags.length > 0) {
-            const errs = await tagsRemove(admin, p.id, existingOffTags);
-            if (errs.length) {
-              operationErrors.push(
-                ...errs.map((msg) => `${p.title}: ${msg}`),
-              );
-            } else {
-              removed.push(...existingOffTags);
-            }
-          }
-          const hasTargetAfterRemoval = p.tags.some(
-            (t) => t.toLowerCase() === targetTag.toLowerCase() && !existingOffTags.includes(t),
-          );
-          if (!hasTargetAfterRemoval) {
-            const errs = await tagsAdd(admin, p.id, [targetTag]);
-            if (errs.length) {
-              operationErrors.push(
-                ...errs.map((msg) => `${p.title}: ${msg}`),
-              );
-            } else {
-              added.push(targetTag);
-            }
-          }
-        } else {
-          const hasTag = p.tags.some((t) => t.toLowerCase() === targetTag.toLowerCase());
-          if (!hasTag) {
-            const errs = await tagsAdd(admin, p.id, [targetTag]);
-            if (errs.length) {
-              operationErrors.push(
-                ...errs.map((msg) => `${p.title}: ${msg}`),
-              );
-            } else {
-              added.push(targetTag);
-            }
-          }
-        }
-      } else {
-        const removeTargets = p.tags.filter(isNumericOffTag);
-        if (removeTargets.length > 0) {
-          const errs = await tagsRemove(admin, p.id, removeTargets);
-          if (errs.length) {
-            operationErrors.push(
-              ...errs.map((msg) => `${p.title}: ${msg}`),
-            );
-          } else {
-            removed.push(...removeTargets);
-          }
-        }
-      }
-      if (added.length || removed.length) {
-        changes.push({
-          product_id: p.id,
-          product_title: p.title,
-          added_tags: added,
-          removed_tags: removed,
-        });
-      }
-    }
-
-    const entry: AutoTagHistoryEntry = {
-      id: randomId(),
-      created_at: new Date().toISOString(),
-      mode: mode as "tag" | "untag_discount",
-      input_skus: inputSkus,
-      target_tag: targetTag,
-      changes,
-      scheduled_undo_at: scheduleUndoAt,
-      undone_at: null,
-    };
-    const next: DiscountConfig = {
-      ...current,
-      auto_tagging: {
-        history: [entry, ...(current.auto_tagging?.history ?? [])].slice(0, 30),
-      },
-    };
-    const persistJson = await persistConfig(admin, configOwnerId, next, { skipRuntime: true });
-    const persistErrors = (persistJson?.data?.metafieldsSet?.userErrors ?? []).map((e: any) =>
-      String(e?.message ?? "Failed to save settings"),
-    );
-    operationErrors.push(...persistErrors.map((msg) => `History: ${msg}`));
-    const protectedMsg =
-      skippedProtected > 0
-        ? ` Skipped ${skippedProtected} HVAC indoor/outdoor listing(s) for discount tags.`
-        : "";
-    const uniqueErrors = Array.from(new Set(operationErrors));
-    if (uniqueErrors.length > 0) {
-      const hasScopeError = uniqueErrors.some((msg) =>
-        /access denied|scope|permission/i.test(msg),
-      );
-      const scopeHint = hasScopeError
-        ? " Add `write_products` to app scopes and re-auth the app."
-        : "";
+    if (matched.length === 0) {
       return {
         ok: false,
-        message: `Matched ${matched.length} listing(s), changed ${changes.length}.${protectedMsg} ${uniqueErrors
-          .slice(0, 3)
-          .join(" | ")}${scopeHint}`,
+        message: "No listings matched those SKU tokens.",
         activeTab: "autoTags",
       };
     }
+
+    const job = await prisma.autoTagJob.create({
+      data: {
+        shop: session.shop,
+        discountNodeId: configOwnerId,
+        status: "running",
+        mode,
+        targetTag: targetTag || null,
+        scheduledUndoAt: scheduleUndoAt,
+        inputSkusJson: JSON.stringify(inputSkus),
+        matchedProductsJson: JSON.stringify(
+          matched.map((p) => ({
+            id: p.id,
+            title: p.title,
+            tags: p.tags,
+            variantSkus: p.variantSkus,
+          })),
+        ),
+        changesJson: "[]",
+        errorsJson: "[]",
+        cursor: 0,
+        processedCount: 0,
+        totalCount: matched.length,
+        changedCount: 0,
+        skippedProtectedCount: 0,
+      },
+    });
+    void processAutoTagJob(admin, session.shop, configOwnerId, job.id);
     return {
       ok: true,
-      message: `Matched ${matched.length} listing(s), changed ${changes.length}.${protectedMsg}`,
+      message: `Started auto-tag job for ${matched.length} listing(s). You can leave this page and check progress later.`,
       activeTab: "autoTags",
+      autoTagJob: toAutoTagJobStatus(job),
+    };
+  }
+
+  if (intent === "auto_tag_job_poll") {
+    const jobId = String(fd.get("auto_tag_job_id") ?? "").trim();
+    if (!jobId) {
+      return { ok: false, activeTab: "autoTags", message: "Missing job id." };
+    }
+    const job = await prisma.autoTagJob.findUnique({ where: { id: jobId } });
+    if (!job || job.shop !== session.shop || job.discountNodeId !== configOwnerId) {
+      return { ok: false, activeTab: "autoTags", message: "Job not found." };
+    }
+    if (job.status === "running") {
+      void processAutoTagJob(admin, session.shop, configOwnerId, job.id);
+    }
+    const jobStatus = toAutoTagJobStatus(job);
+    const pct =
+      jobStatus.totalCount > 0
+        ? Math.floor((jobStatus.processedCount / jobStatus.totalCount) * 100)
+        : 100;
+    const done = jobStatus.status !== "running";
+    return {
+      ok: jobStatus.status === "completed",
+      activeTab: "autoTags",
+      autoTagJob: jobStatus,
+      message: done
+        ? `Auto-tag job ${jobStatus.status}. Processed ${jobStatus.processedCount}/${jobStatus.totalCount}.`
+        : `Auto-tag job running: ${pct}% (${jobStatus.processedCount}/${jobStatus.totalCount}).`,
     };
   }
 
@@ -1735,8 +1974,17 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       selectedRuleBrand || String(outdoorBrandBySku.get(outdoorSourceSku) ?? "").trim();
     const ruleBrand = resolvedRuleBrand;
     const ruleRefrigerant = String(outdoorRefrigerantBySku.get(outdoorSourceSku) ?? "").trim();
+    const allowedIndoorSourceSkuSet = new Set(
+      Array.isArray(c?.allowedIndoorSourceSkus)
+        ? c.allowedIndoorSourceSkus.map((sku) => String(sku ?? "").trim()).filter(Boolean)
+        : [],
+    );
     const baseIndoorSourceSkus = Array.from(hvacIndoorBySourceSku.keys());
-    const brandRefrigerantFilteredSourceSkus = baseIndoorSourceSkus.filter((sku) => {
+    const constrainedIndoorSourceSkus =
+      allowedIndoorSourceSkuSet.size > 0
+        ? baseIndoorSourceSkus.filter((sku) => allowedIndoorSourceSkuSet.has(sku))
+        : baseIndoorSourceSkus;
+    const brandRefrigerantFilteredSourceSkus = constrainedIndoorSourceSkus.filter((sku) => {
       const indoorBrand = String(indoorBrandBySku.get(sku) ?? "").trim();
       const indoorRefrigerant = String(indoorRefrigerantBySku.get(sku) ?? "").trim();
       const brandOk = Boolean(ruleBrand) && Boolean(indoorBrand) && norm(indoorBrand) === norm(ruleBrand);
@@ -1952,8 +2200,10 @@ export default function DiscountDetailsRoute() {
     hvacOutdoorOptions,
     hvacIndoorOptions,
     outdoorCatalogConstraints,
+    activeAutoTagJob,
   } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
+  const autoTagJobFetcher = useFetcher<typeof action>();
   const navigation = useNavigation();
   const isSaving = navigation.state === "submitting";
   const [tab, setTab] = useState<"order" | "item" | "otherDiscounts" | "autoTags" | "review">("order");
@@ -1967,10 +2217,37 @@ export default function DiscountDetailsRoute() {
     withRuleUiIds(config.hvac_rule.combination_rules ?? []),
   );
   const [editingHvacRuleId, setEditingHvacRuleId] = useState<string | null>(null);
+  const [autoTagJob, setAutoTagJob] = useState<AutoTagJobStatus | null>(
+    (activeAutoTagJob as AutoTagJobStatus | null) ?? null,
+  );
   useEffect(() => {
     const nextTab = String((actionData as any)?.activeTab ?? "");
     if (nextTab === "autoTags") setTab("autoTags");
   }, [actionData]);
+  useEffect(() => {
+    setAutoTagJob((activeAutoTagJob as AutoTagJobStatus | null) ?? null);
+  }, [activeAutoTagJob]);
+  useEffect(() => {
+    const actionJob = (actionData as any)?.autoTagJob as AutoTagJobStatus | undefined;
+    if (actionJob?.id) setAutoTagJob(actionJob);
+  }, [actionData]);
+  useEffect(() => {
+    const fetcherJob = (autoTagJobFetcher.data as any)?.autoTagJob as AutoTagJobStatus | undefined;
+    if (fetcherJob?.id) setAutoTagJob(fetcherJob);
+  }, [autoTagJobFetcher.data]);
+  useEffect(() => {
+    if (!autoTagJob?.id || autoTagJob.status !== "running") return;
+    const runPoll = () => {
+      if (autoTagJobFetcher.state !== "idle") return;
+      const fd = new FormData();
+      fd.set("intent", "auto_tag_job_poll");
+      fd.set("auto_tag_job_id", autoTagJob.id);
+      autoTagJobFetcher.submit(fd, { method: "post" });
+    };
+    runPoll();
+    const timer = setInterval(runPoll, 2500);
+    return () => clearInterval(timer);
+  }, [autoTagJob?.id, autoTagJob?.status, autoTagJobFetcher, autoTagJobFetcher.state]);
   const cardStyle: CSSProperties = {
     border: "1px solid rgba(17,24,39,0.12)",
     borderRadius: 12,
@@ -2382,7 +2659,18 @@ export default function DiscountDetailsRoute() {
                       const constraint = outdoorCatalogConstraints[rule.outdoor_source_sku];
                       const brand = String(selectedBrand || outdoorMeta?.sourceBrand || "").trim();
                       const outdoorRefrigerant = String(outdoorMeta?.sourceRefrigerant ?? "").trim();
+                      const allowedIndoorSourceSkuSet = new Set(
+                        Array.isArray(constraint?.allowedIndoorSourceSkus)
+                          ? constraint.allowedIndoorSourceSkus
+                              .map((sku: any) => String(sku ?? "").trim())
+                              .filter(Boolean)
+                          : [],
+                      );
                       const filteredIndoor = hvacIndoorOptions.filter((opt: any) => {
+                        const indoorSourceSku = String(opt?.sourceSku ?? "").trim();
+                        const allowedOk =
+                          allowedIndoorSourceSkuSet.size === 0 ||
+                          allowedIndoorSourceSkuSet.has(indoorSourceSku);
                         const indoorBrand = String(opt?.sourceBrand ?? "").trim();
                         const indoorRefrigerant = String(opt?.sourceRefrigerant ?? "").trim();
                         const brandOk = Boolean(brand) && Boolean(indoorBrand) && norm(indoorBrand) === norm(brand);
@@ -2390,7 +2678,7 @@ export default function DiscountDetailsRoute() {
                           Boolean(outdoorRefrigerant) &&
                           Boolean(indoorRefrigerant) &&
                           norm(indoorRefrigerant) === norm(outdoorRefrigerant);
-                        return brandOk && refrigerantOk;
+                        return allowedOk && brandOk && refrigerantOk;
                       });
                       const availableHeadTypes = Array.from(
                         new Set(filteredIndoor.map((opt: any) => inferIndoorHeadType(opt)).filter(Boolean)),
@@ -2823,6 +3111,51 @@ export default function DiscountDetailsRoute() {
                     {String((actionData as any).message)}
                   </s-banner>
                 ) : null}
+                {autoTagJob ? (
+                  <div style={{ ...cardStyle, borderColor: "rgba(11,121,227,0.28)" }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: "#0f172a" }}>
+                      Auto-tag job: {autoTagJob.status}
+                    </div>
+                    <div style={{ marginTop: 6, fontSize: 13, color: "#334155" }}>
+                      {autoTagJob.processedCount}/{autoTagJob.totalCount} processed | changed{" "}
+                      {autoTagJob.changedCount} | skipped HVAC {autoTagJob.skippedProtectedCount} | errors{" "}
+                      {autoTagJob.errorCount}
+                    </div>
+                    <div
+                      style={{
+                        marginTop: 8,
+                        height: 10,
+                        borderRadius: 999,
+                        background: "rgba(15,23,42,0.12)",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          height: "100%",
+                          width: `${
+                            autoTagJob.totalCount > 0
+                              ? Math.max(0, Math.min(100, (autoTagJob.processedCount / autoTagJob.totalCount) * 100))
+                              : autoTagJob.status === "running"
+                                ? 0
+                                : 100
+                          }%`,
+                          background:
+                            autoTagJob.status === "completed"
+                              ? "#10B981"
+                              : autoTagJob.status === "failed"
+                                ? "#EF4444"
+                                : "#0B79E3",
+                          transition: "width 200ms ease",
+                        }}
+                      />
+                    </div>
+                    <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>
+                      Started {new Date(autoTagJob.createdAt).toLocaleString()}
+                      {autoTagJob.status === "running" ? " (running in background)" : ""}
+                    </div>
+                  </div>
+                ) : null}
 
                 <div style={{ ...cardStyle, display: "grid", gap: 10 }}>
                   <div style={{ display: "grid", gap: 10, gridTemplateColumns: "2fr 1fr" }}>
@@ -2866,7 +3199,12 @@ export default function DiscountDetailsRoute() {
                   </div>
 
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <button type="submit" name="intent" value="auto_tag_apply">
+                    <button
+                      type="submit"
+                      name="intent"
+                      value="auto_tag_apply"
+                      disabled={autoTagJob?.status === "running"}
+                    >
                       Apply auto tag action
                     </button>
                     <button type="submit" name="intent" value="auto_tag_run_due">
