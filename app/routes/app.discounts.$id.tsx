@@ -540,13 +540,45 @@ function buildRuntimeFunctionConfig(config: DiscountConfig) {
   };
 }
 
+function buildAdminConfiguration(config: DiscountConfig): DiscountConfig {
+  return {
+    ...config,
+    item_collection_rules: (config.item_collection_rules ?? []).map((rule) => ({
+      collection_id: String(rule?.collection_id ?? "").trim(),
+      percent: normalizeNum(rule?.percent, 0),
+      // Product IDs are derived at save-time; keep admin payload lean.
+      product_ids: [],
+    })),
+    collection_spend_rule: {
+      ...config.collection_spend_rule,
+      // Product IDs are derived from collection on save.
+      product_ids: [],
+    },
+    hvac_rule: {
+      ...config.hvac_rule,
+      // Keep heavy mapped ID arrays out of admin config to avoid size limits.
+      indoor_product_ids: [],
+      outdoor_product_ids: [],
+      combination_rules: (config.hvac_rule?.combination_rules ?? []).map((rule) => ({
+        ...rule,
+        indoor_product_ids: [],
+        outdoor_product_ids: [],
+      })),
+    },
+  };
+}
+
 async function persistConfig(
   admin: any,
   ownerId: string,
   config: DiscountConfig,
+  options?: { skipRuntime?: boolean },
 ) {
-  const payload = JSON.stringify(config);
-  const runtimePayload = JSON.stringify(buildRuntimeFunctionConfig(config));
+  const payload = JSON.stringify(buildAdminConfiguration(config));
+  const skipRuntime = Boolean(options?.skipRuntime);
+  const runtimePayload = skipRuntime
+    ? ""
+    : JSON.stringify(buildRuntimeFunctionConfig(config));
   const cleanedOwnerId = String(ownerId ?? "").trim();
   if (!cleanedOwnerId) {
     return {
@@ -565,38 +597,40 @@ async function persistConfig(
     value: string;
   }> = [];
   let runtimeWarning: string | null = null;
-  const runtimeBytes = Buffer.byteLength(runtimePayload, "utf8");
+  if (!skipRuntime) {
+    const runtimeBytes = Buffer.byteLength(runtimePayload, "utf8");
 
-  if (runtimeBytes <= FUNCTION_CONFIG_MAX_BYTES) {
-    runtimeMetafields.push({
-      ownerId: cleanedOwnerId,
-      namespace: "$app",
-      key: FUNCTION_CONFIG_KEY,
-      type: "json",
-      value: runtimePayload,
-    });
-  } else {
-    const chunks = splitUtf8ByBytes(runtimePayload, FUNCTION_CONFIG_MAX_BYTES);
-    if (chunks.length > FUNCTION_CONFIG_MAX_CHUNKS) {
-      runtimeWarning = `Runtime function config is too large (${runtimeBytes} bytes). Settings were saved, but checkout runtime was not updated. Reduce selected item/HVAC products or use fewer large collection rules, then save again.`;
-    } else {
+    if (runtimeBytes <= FUNCTION_CONFIG_MAX_BYTES) {
       runtimeMetafields.push({
         ownerId: cleanedOwnerId,
         namespace: "$app",
         key: FUNCTION_CONFIG_KEY,
         type: "json",
-        value: JSON.stringify({ chunked: true, parts: chunks.length }),
+        value: runtimePayload,
       });
-
-      chunks.forEach((chunk, idx) => {
+    } else {
+      const chunks = splitUtf8ByBytes(runtimePayload, FUNCTION_CONFIG_MAX_BYTES);
+      if (chunks.length > FUNCTION_CONFIG_MAX_CHUNKS) {
+        runtimeWarning = `Runtime function config is too large (${runtimeBytes} bytes). Settings were saved, but checkout runtime was not updated. Reduce selected item/HVAC products or use fewer large collection rules, then save again.`;
+      } else {
         runtimeMetafields.push({
           ownerId: cleanedOwnerId,
           namespace: "$app",
-          key: `${FUNCTION_CONFIG_CHUNK_KEY_PREFIX}${idx + 1}`,
-          type: "multi_line_text_field",
-          value: chunk,
+          key: FUNCTION_CONFIG_KEY,
+          type: "json",
+          value: JSON.stringify({ chunked: true, parts: chunks.length }),
         });
-      });
+
+        chunks.forEach((chunk, idx) => {
+          runtimeMetafields.push({
+            ownerId: cleanedOwnerId,
+            namespace: "$app",
+            key: `${FUNCTION_CONFIG_CHUNK_KEY_PREFIX}${idx + 1}`,
+            type: "multi_line_text_field",
+            value: chunk,
+          });
+        });
+      }
     }
   }
 
@@ -1175,7 +1209,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         history: [entry, ...(current.auto_tagging?.history ?? [])].slice(0, 30),
       },
     };
-    const persistJson = await persistConfig(admin, configOwnerId, next);
+    const persistJson = await persistConfig(admin, configOwnerId, next, { skipRuntime: true });
     const persistErrors = (persistJson?.data?.metafieldsSet?.userErrors ?? []).map((e: any) =>
       String(e?.message ?? "Failed to save settings"),
     );
@@ -1280,7 +1314,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       ...current,
       auto_tagging: { history: [...undoEntries, ...history].slice(0, 30) },
     };
-    const persistJson = await persistConfig(admin, configOwnerId, next);
+    const persistJson = await persistConfig(admin, configOwnerId, next, { skipRuntime: true });
     const persistErrors = (persistJson?.data?.metafieldsSet?.userErrors ?? []).map((e: any) =>
       String(e?.message ?? "Failed to save settings"),
     );
