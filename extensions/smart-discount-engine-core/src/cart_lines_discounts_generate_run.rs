@@ -485,6 +485,7 @@ fn cart_lines_discounts_generate_run(
         }
 
         let base_percent_candidate = order_level_percent.max(item_percent);
+        let current_promo_source = current_promo_attribution(&discount_percents, item_percent);
         if hvac_fixed_exclusive_qty > 0 {
             let hvac_fixed_per_item =
                 hvac_fixed_exclusive_amount_total / (hvac_fixed_exclusive_qty as f64);
@@ -497,8 +498,7 @@ fn cart_lines_discounts_generate_run(
                     },
                 )],
                 message: Some(format!(
-                    "{}: ${} off on {} outdoor unit(s)",
-                    config.cart_labels.hvac_exclusive_label,
+                    "Bundle discount: ${} off on {} outdoor unit(s)",
                     fmt_percent(hvac_fixed_per_item_capped),
                     hvac_fixed_exclusive_qty
                 )),
@@ -529,8 +529,7 @@ fn cart_lines_discounts_generate_run(
                     },
                 )],
                 message: Some(format!(
-                    "{}: ${} off + {}% on {} outdoor unit(s)",
-                    config.cart_labels.hvac_stack_label,
+                    "Bundle discount: ${} off + {}% on {} outdoor unit(s)",
                     fmt_percent(hvac_fixed_per_item),
                     fmt_percent(base_percent_candidate),
                     hvac_fixed_stackable_qty
@@ -552,6 +551,14 @@ fn cart_lines_discounts_generate_run(
         let hvac_stackable_with_base = (base_percent_candidate + hvac_stackable_percent_sum).min(100.0);
         let hvac_exclusive_with_base = base_percent_candidate.max(hvac_exclusive_percent_best);
         let hvac_percent_candidate = hvac_stackable_with_base.max(hvac_exclusive_with_base);
+        let bundle_percent_active = hvac_stackable_percent_sum > 0.0 || hvac_exclusive_percent_best > 0.0;
+        let hvac_percent_attribution = if bundle_percent_active && base_percent_candidate > 0.0 {
+            format!("Current Promo ({}) + Bundle discount", current_promo_source)
+        } else if bundle_percent_active {
+            "Bundle discount".to_string()
+        } else {
+            format!("Current Promo ({})", current_promo_source)
+        };
 
         if fixed_qty > 0 && fixed_amount_per_item > 0.0 {
             candidates.push(schema::ProductDiscountCandidate {
@@ -562,8 +569,7 @@ fn cart_lines_discounts_generate_run(
                     },
                 )],
                 message: Some(format!(
-                    "{}: ${} off on {} item(s)",
-                    config.cart_labels.other_label,
+                    "Accessories discount: ${} off on {} item(s)",
                     fmt_percent(fixed_amount_per_item),
                     fixed_qty
                 )),
@@ -587,16 +593,10 @@ fn cart_lines_discounts_generate_run(
                         },
                     )],
                     message: Some(format!(
-                        "{} {}% (first {} | bulk {} | vip {} | item {} | other units {} | hvac {} | hvac units {})",
+                        "{} {}% ({})",
                         config.cart_labels.best_label,
                         fmt_percent(hvac_percent_candidate),
-                        fmt_percent(discount_percents.first_order),
-                        fmt_percent(discount_percents.bulk),
-                        fmt_percent(discount_percents.vip),
-                        fmt_percent(item_percent),
-                        fixed_qty,
-                        fmt_percent(hvac_percent_candidate),
-                        hvac_percent_qty
+                        hvac_percent_attribution
                     )),
                     value: schema::ProductDiscountCandidateValue::Percentage(schema::Percentage {
                         value: Decimal(hvac_percent_candidate),
@@ -615,14 +615,10 @@ fn cart_lines_discounts_generate_run(
                     },
                 )],
                 message: Some(format!(
-                    "{} {}% (first {} | bulk {} | vip {} | item {} | other units {})",
+                    "{} {}% (Current Promo: {})",
                     config.cart_labels.best_label,
                     fmt_percent(base_percent_candidate),
-                    fmt_percent(discount_percents.first_order),
-                    fmt_percent(discount_percents.bulk),
-                    fmt_percent(discount_percents.vip),
-                    fmt_percent(item_percent),
-                    fixed_qty
+                    current_promo_source
                 )),
                 value: schema::ProductDiscountCandidateValue::Percentage(schema::Percentage {
                     value: Decimal(base_percent_candidate),
@@ -1049,6 +1045,34 @@ fn fmt_percent(value: f64) -> String {
     }
 }
 
+fn current_promo_attribution(discount_percents: &DiscountPercents, item_percent: f64) -> String {
+    let mut best_source = "None";
+    let mut best_percent = 0.0;
+
+    if discount_percents.first_order > best_percent {
+        best_percent = discount_percents.first_order;
+        best_source = "First";
+    }
+    if discount_percents.bulk > best_percent {
+        best_percent = discount_percents.bulk;
+        best_source = "Bulk";
+    }
+    if discount_percents.vip > best_percent {
+        best_percent = discount_percents.vip;
+        best_source = "VIP";
+    }
+    if item_percent > best_percent {
+        best_percent = item_percent;
+        best_source = "Item";
+    }
+
+    if best_percent <= 0.0 {
+        "None".to_string()
+    } else {
+        format!("{} {}%", best_source, fmt_percent(best_percent))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1077,20 +1101,24 @@ mod tests {
     #[test]
     fn collection_spend_units_follow_steps_and_qty_cap() {
         assert_eq!(
-            compute_collection_spend_units(1_499.0, 10.0, 1.0, 1_500.0, 100.0),
+            compute_collection_spend_units(1_499.0, 10.0, 1.0, 1_500.0, 100.0, 0.0),
             0
         );
         assert_eq!(
-            compute_collection_spend_units(3_000.0, 1.0, 1.0, 1_500.0, 100.0),
+            compute_collection_spend_units(3_000.0, 1.0, 1.0, 1_500.0, 100.0, 0.0),
             1
         );
         assert_eq!(
-            compute_collection_spend_units(4_500.0, 7.0, 1.0, 1_500.0, 100.0),
+            compute_collection_spend_units(4_500.0, 7.0, 1.0, 1_500.0, 100.0, 0.0),
             3
         );
         assert_eq!(
-            compute_collection_spend_units(4_500.0, 7.0, 1.0, 1_500.0, 0.0),
+            compute_collection_spend_units(4_500.0, 7.0, 1.0, 1_500.0, 0.0, 0.0),
             0
+        );
+        assert_eq!(
+            compute_collection_spend_units(15_000.0, 12.0, 1.0, 1_500.0, 100.0, 5.0),
+            5
         );
     }
 
