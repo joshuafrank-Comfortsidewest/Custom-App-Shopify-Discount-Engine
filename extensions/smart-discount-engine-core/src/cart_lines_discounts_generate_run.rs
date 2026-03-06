@@ -551,10 +551,10 @@ fn cart_lines_discounts_generate_run(
         let hvac_stackable_with_base = (base_percent_candidate + hvac_stackable_percent_sum).min(100.0);
         let hvac_exclusive_with_base = base_percent_candidate.max(hvac_exclusive_percent_best);
         let hvac_percent_candidate = hvac_stackable_with_base.max(hvac_exclusive_with_base);
-        let bundle_percent_active = hvac_stackable_percent_sum > 0.0 || hvac_exclusive_percent_best > 0.0;
-        let hvac_percent_attribution = if bundle_percent_active && base_percent_candidate > 0.0 {
+        let bundle_percent_contributed = hvac_percent_candidate > (base_percent_candidate + 0.0001);
+        let hvac_percent_attribution = if bundle_percent_contributed && base_percent_candidate > 0.0 {
             format!("{} + Bundle discount", current_promo_source)
-        } else if bundle_percent_active {
+        } else if bundle_percent_contributed {
             "Bundle discount".to_string()
         } else {
             current_promo_source.clone()
