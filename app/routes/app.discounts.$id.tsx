@@ -216,6 +216,18 @@ type OutdoorCatalogConstraint = {
   allowedIndoorSourceSkus: string[];
 };
 
+function expandIndoorSourceSkuAliases(rawSku: unknown): string[] {
+  const sku = String(rawSku ?? "").trim().toUpperCase();
+  if (!sku) return [];
+  const aliases = new Set<string>([sku]);
+  // OLMO R410 indoor SKUs can appear in data as OS-09... or OS-M09...
+  const withoutM = sku.replace(/^OS-M(?=\d{2}[A-Z0-9]*-)/, "OS-");
+  const withM = sku.replace(/^OS-(?=\d{2}[A-Z0-9]*-)/, "OS-M");
+  aliases.add(withoutM);
+  aliases.add(withM);
+  return Array.from(aliases).filter(Boolean);
+}
+
 function loadOutdoorCatalogConstraints(): Record<string, OutdoorCatalogConstraint> {
   try {
     const p = path.resolve("app/data/hvac/hvac-bundle-catalog.json");
@@ -234,8 +246,9 @@ function loadOutdoorCatalogConstraints(): Record<string, OutdoorCatalogConstrain
       for (const slot of indoorSlots) {
         const skus = Array.isArray(slot?.candidateSkus) ? slot.candidateSkus : [];
         for (const s of skus) {
-          const v = String(s ?? "").trim();
-          if (v) allowed.add(v);
+          for (const alias of expandIndoorSourceSkuAliases(s)) {
+            if (alias) allowed.add(alias);
+          }
         }
       }
       const prev = bySku.get(sku);
@@ -2048,13 +2061,17 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     const ruleRefrigerant = String(outdoorRefrigerantBySku.get(outdoorSourceSku) ?? "").trim();
     const allowedIndoorSourceSkuSet = new Set(
       Array.isArray(c?.allowedIndoorSourceSkus)
-        ? c.allowedIndoorSourceSkus.map((sku) => String(sku ?? "").trim()).filter(Boolean)
+        ? c.allowedIndoorSourceSkus
+            .map((sku) => String(sku ?? "").trim().toUpperCase())
+            .filter(Boolean)
         : [],
     );
     const baseIndoorSourceSkus = Array.from(hvacIndoorBySourceSku.keys());
     const constrainedIndoorSourceSkus =
       allowedIndoorSourceSkuSet.size > 0
-        ? baseIndoorSourceSkus.filter((sku) => allowedIndoorSourceSkuSet.has(sku))
+        ? baseIndoorSourceSkus.filter((sku) =>
+            allowedIndoorSourceSkuSet.has(String(sku ?? "").trim().toUpperCase()),
+          )
         : baseIndoorSourceSkus;
     const brandRefrigerantFilteredSourceSkus = constrainedIndoorSourceSkus.filter((sku) => {
       const indoorBrand = String(indoorBrandBySku.get(sku) ?? "").trim();
@@ -2808,7 +2825,7 @@ export default function DiscountDetailsRoute() {
                       const allowedIndoorSourceSkuSet = new Set(
                         Array.isArray(constraint?.allowedIndoorSourceSkus)
                           ? constraint.allowedIndoorSourceSkus
-                              .map((sku: any) => String(sku ?? "").trim())
+                              .map((sku: any) => String(sku ?? "").trim().toUpperCase())
                               .filter(Boolean)
                           : [],
                       );
@@ -2816,7 +2833,7 @@ export default function DiscountDetailsRoute() {
                         const indoorSourceSku = String(opt?.sourceSku ?? "").trim();
                         const allowedOk =
                           allowedIndoorSourceSkuSet.size === 0 ||
-                          allowedIndoorSourceSkuSet.has(indoorSourceSku);
+                          allowedIndoorSourceSkuSet.has(indoorSourceSku.toUpperCase());
                         const indoorBrand = String(opt?.sourceBrand ?? "").trim();
                         const indoorRefrigerant = String(opt?.sourceRefrigerant ?? "").trim();
                         const brandOk = Boolean(brand) && Boolean(indoorBrand) && norm(indoorBrand) === norm(brand);
