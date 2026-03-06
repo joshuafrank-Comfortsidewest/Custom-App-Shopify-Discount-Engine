@@ -553,11 +553,11 @@ fn cart_lines_discounts_generate_run(
         let hvac_percent_candidate = hvac_stackable_with_base.max(hvac_exclusive_with_base);
         let bundle_percent_active = hvac_stackable_percent_sum > 0.0 || hvac_exclusive_percent_best > 0.0;
         let hvac_percent_attribution = if bundle_percent_active && base_percent_candidate > 0.0 {
-            format!("Current Promo ({}) + Bundle discount", current_promo_source)
+            format!("{} + Bundle discount", current_promo_source)
         } else if bundle_percent_active {
             "Bundle discount".to_string()
         } else {
-            format!("Current Promo ({})", current_promo_source)
+            current_promo_source.clone()
         };
 
         if fixed_qty > 0 && fixed_amount_per_item > 0.0 {
@@ -615,7 +615,7 @@ fn cart_lines_discounts_generate_run(
                     },
                 )],
                 message: Some(format!(
-                    "{} {}% (Current Promo: {})",
+                    "{} {}% ({})",
                     config.cart_labels.best_label,
                     fmt_percent(base_percent_candidate),
                     current_promo_source
@@ -1063,7 +1063,7 @@ fn current_promo_attribution(discount_percents: &DiscountPercents, item_percent:
     }
     if item_percent > best_percent {
         best_percent = item_percent;
-        best_source = "Item";
+        best_source = "Current Promotion";
     }
 
     if best_percent <= 0.0 {
