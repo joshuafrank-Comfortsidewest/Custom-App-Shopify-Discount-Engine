@@ -79,6 +79,7 @@ type CollectionSpendRule = {
   amount_off_per_step: number;
   min_collection_qty: number;
   spend_step_amount: number;
+  max_discounted_units_per_order: number;
   product_ids: string[];
   activation: {
     mode: ActivationMode;
@@ -148,6 +149,7 @@ const DEFAULT_CONFIG: DiscountConfig = {
     amount_off_per_step: 100,
     min_collection_qty: 1,
     spend_step_amount: 1500,
+    max_discounted_units_per_order: 0,
     product_ids: [],
     activation: {
       mode: "always",
@@ -739,6 +741,13 @@ function buildRuntimeFunctionConfig(config: DiscountConfig) {
           config.collection_spend_rule?.spend_step_amount,
           DEFAULT_CONFIG.collection_spend_rule.spend_step_amount,
         ),
+        max_discounted_units_per_order: Math.max(
+          0,
+          normalizeNum(
+            config.collection_spend_rule?.max_discounted_units_per_order,
+            DEFAULT_CONFIG.collection_spend_rule.max_discounted_units_per_order,
+          ),
+        ),
         product_ids: compactProductIds(config.collection_spend_rule?.product_ids),
         activation: {
           ...DEFAULT_CONFIG.collection_spend_rule.activation,
@@ -1180,6 +1189,10 @@ function parseConfig(raw: string | null | undefined): DiscountConfig {
             p.collection_spend_rule?.percent_off_per_step ??
             DEFAULT_CONFIG.collection_spend_rule.amount_off_per_step,
         ),
+        max_discounted_units_per_order: Number(
+          p.collection_spend_rule?.max_discounted_units_per_order ??
+            DEFAULT_CONFIG.collection_spend_rule.max_discounted_units_per_order,
+        ),
         activation: {
           ...DEFAULT_CONFIG.collection_spend_rule.activation,
           ...(p.collection_spend_rule?.activation ?? {}),
@@ -1267,6 +1280,13 @@ function parseConfig(raw: string | null | undefined): DiscountConfig {
                 merged.collection_spend_rule.spend_step_amount,
                 DEFAULT_CONFIG.collection_spend_rule.spend_step_amount,
               ),
+        max_discounted_units_per_order: Math.max(
+          0,
+          normalizeNum(
+            merged.collection_spend_rule.max_discounted_units_per_order,
+            DEFAULT_CONFIG.collection_spend_rule.max_discounted_units_per_order,
+          ),
+        ),
       },
       hvac_rule: {
         ...merged.hvac_rule,
@@ -2100,6 +2120,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         fd.get("collection_spend_step_amount"),
         current.collection_spend_rule.spend_step_amount,
       ),
+      max_discounted_units_per_order: Math.max(
+        0,
+        toNum(
+          fd.get("collection_spend_max_units_per_order"),
+          current.collection_spend_rule.max_discounted_units_per_order,
+        ),
+      ),
       product_ids: csProductIds,
       activation: {
         mode: hasOtherDiscountInputs
@@ -2350,6 +2377,11 @@ export default function DiscountDetailsRoute() {
                 Math.max(0.01, Number(config.collection_spend_rule.spend_step_amount || 0.01)),
             ),
             Math.floor(Math.max(0, previewOtherEligibleQty)),
+            Number(config.collection_spend_rule.max_discounted_units_per_order || 0) > 0
+              ? Math.floor(
+                  Math.max(0, Number(config.collection_spend_rule.max_discounted_units_per_order || 0)),
+                )
+              : Number.MAX_SAFE_INTEGER,
           ),
         )
       : 0;
@@ -2606,6 +2638,17 @@ export default function DiscountDetailsRoute() {
                 <label style={labelStyle}>
                   Z: Cart subtotal step ($)
                   <input style={inputStyle} name="collection_spend_step_amount" type="number" step="0.01" defaultValue={config.collection_spend_rule.spend_step_amount} />
+                </label>
+                <label style={labelStyle}>
+                  Max discounted units per order (0 = no cap)
+                  <input
+                    style={inputStyle}
+                    name="collection_spend_max_units_per_order"
+                    type="number"
+                    min="0"
+                    step="1"
+                    defaultValue={config.collection_spend_rule.max_discounted_units_per_order}
+                  />
                 </label>
               </div>
               <label style={labelStyle}>

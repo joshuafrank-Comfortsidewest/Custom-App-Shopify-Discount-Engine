@@ -101,6 +101,7 @@ struct CollectionSpendRuleConfig {
     amount_off_per_step: f64,
     min_collection_qty: f64,
     spend_step_amount: f64,
+    max_discounted_units_per_order: f64,
     product_ids: Vec<String>,
     activation: CollectionSpendActivation,
 }
@@ -112,6 +113,7 @@ impl Default for CollectionSpendRuleConfig {
             amount_off_per_step: 100.0,
             min_collection_qty: 1.0,
             spend_step_amount: 1500.0,
+            max_discounted_units_per_order: 0.0,
             product_ids: vec![],
             activation: CollectionSpendActivation::default(),
         }
@@ -686,6 +688,7 @@ fn collection_spend_discountable_units(
         rule.min_collection_qty,
         rule.spend_step_amount,
         rule.amount_off_per_step,
+        rule.max_discounted_units_per_order,
     )
 }
 
@@ -695,6 +698,7 @@ fn compute_collection_spend_units(
     min_collection_qty: f64,
     spend_step_amount: f64,
     amount_off_per_step: f64,
+    max_discounted_units_per_order: f64,
 ) -> i32 {
     if amount_off_per_step <= 0.0 {
         return 0;
@@ -707,7 +711,13 @@ fn compute_collection_spend_units(
 
     let steps = (cart_subtotal / spend_step).floor() as i32;
     let eligible_units = eligible_qty.floor() as i32;
-    steps.min(eligible_units).max(0)
+    let computed_units = steps.min(eligible_units).max(0);
+    let max_units = if max_discounted_units_per_order > 0.0 {
+        max_discounted_units_per_order.floor() as i32
+    } else {
+        i32::MAX
+    };
+    computed_units.min(max_units).max(0)
 }
 
 fn active_hvac_rules(
