@@ -424,7 +424,10 @@ async function processAutoTagJob(
             history: [entry, ...(currentConfig.auto_tagging?.history ?? [])].slice(0, 30),
           },
         };
-        const persistJson = await persistConfig(admin, configOwnerId, nextConfig, { skipRuntime: true });
+        const persistJson = await persistConfig(admin, configOwnerId, nextConfig, {
+          skipRuntime: true,
+          shopOwnerId: shopMeta.shopId,
+        });
         const persistErrors = (persistJson?.data?.metafieldsSet?.userErrors ?? []).map((e: any) =>
           String(e?.message ?? "Failed to save settings"),
         );
@@ -647,6 +650,9 @@ const FUNCTION_CONFIG_CHUNK_KEY_PREFIX = "function-configuration-part-";
 const FUNCTION_CONFIG_MAX_CHUNKS = 4;
 const ADMIN_CONFIG_CHUNK_KEY_PREFIX = "admin-configuration-part-";
 const ADMIN_CONFIG_MAX_CHUNKS = 8;
+const SHOP_RUNTIME_MIRROR_NAMESPACE = "smart_discount_engine";
+const SHOP_RUNTIME_MIRROR_KEY = "config";
+const SHOP_RUNTIME_APP_MIRROR_NAMESPACE = "$app:smart_discount_engine";
 
 function splitUtf8ByBytes(input: string, maxBytes: number): string[] {
   if (maxBytes <= 0) return [input];
@@ -870,10 +876,11 @@ async function persistConfig(
   admin: any,
   ownerId: string,
   config: DiscountConfig,
-  options?: { skipRuntime?: boolean },
+  options?: { skipRuntime?: boolean; shopOwnerId?: string },
 ) {
   const payload = JSON.stringify(buildAdminConfiguration(config));
   const skipRuntime = Boolean(options?.skipRuntime);
+  const cleanedShopOwnerId = String(options?.shopOwnerId ?? "").trim();
   const runtimePayload = skipRuntime
     ? ""
     : JSON.stringify(buildRuntimeFunctionConfig(config));
@@ -903,6 +910,13 @@ async function persistConfig(
   }> = [];
   let adminWarning: string | null = null;
   let runtimeWarning: string | null = null;
+  const runtimeMirrorMetafields: Array<{
+    ownerId: string;
+    namespace: string;
+    key: string;
+    type: string;
+    value: string;
+  }> = [];
   const adminBytes = Buffer.byteLength(payload, "utf8");
   if (adminBytes <= FUNCTION_CONFIG_MAX_BYTES) {
     adminMetafields.push({
@@ -970,6 +984,24 @@ async function persistConfig(
         });
       }
     }
+    if (runtimeMetafields.length > 0 && cleanedShopOwnerId) {
+      runtimeMirrorMetafields.push(
+        {
+          ownerId: cleanedShopOwnerId,
+          namespace: SHOP_RUNTIME_APP_MIRROR_NAMESPACE,
+          key: SHOP_RUNTIME_MIRROR_KEY,
+          type: "json",
+          value: runtimePayload,
+        },
+        {
+          ownerId: cleanedShopOwnerId,
+          namespace: SHOP_RUNTIME_MIRROR_NAMESPACE,
+          key: SHOP_RUNTIME_MIRROR_KEY,
+          type: "json",
+          value: runtimePayload,
+        },
+      );
+    }
   }
 
   const setMetafields = async (metafields: Array<{
@@ -1007,8 +1039,11 @@ async function persistConfig(
     userErrors.push({ field: ["admin"], message: adminWarning });
   }
 
+  let runtimePersistSucceeded = false;
   if (runtimeMetafields.length > 0) {
     const runtimeJson = await setMetafields(runtimeMetafields);
+    const runtimeUserErrors = runtimeJson?.data?.metafieldsSet?.userErrors ?? [];
+    const runtimeGraphQLErrors = runtimeJson?.errors ?? [];
     for (const e of runtimeJson?.data?.metafieldsSet?.userErrors ?? []) {
       userErrors.push({
         field: Array.isArray(e?.field) ? e.field : ["runtimeConfiguration"],
@@ -1016,6 +1051,20 @@ async function persistConfig(
       });
     }
     for (const e of runtimeJson?.errors ?? []) {
+      userErrors.push({ field: ["graphql"], message: String(e?.message ?? "GraphQL error") });
+    }
+    runtimePersistSucceeded = runtimeUserErrors.length === 0 && runtimeGraphQLErrors.length === 0;
+  }
+
+  if (runtimePersistSucceeded && runtimeMirrorMetafields.length > 0) {
+    const mirrorJson = await setMetafields(runtimeMirrorMetafields);
+    for (const e of mirrorJson?.data?.metafieldsSet?.userErrors ?? []) {
+      userErrors.push({
+        field: Array.isArray(e?.field) ? e.field : ["runtimeMirrorConfiguration"],
+        message: String(e?.message ?? "Unknown error"),
+      });
+    }
+    for (const e of mirrorJson?.errors ?? []) {
       userErrors.push({ field: ["graphql"], message: String(e?.message ?? "GraphQL error") });
     }
   }
@@ -1666,7 +1715,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       ...current,
       auto_tagging: { history: [...undoEntries, ...history].slice(0, 30) },
     };
-    const persistJson = await persistConfig(admin, configOwnerId, next, { skipRuntime: true });
+    const persistJson = await persistConfig(admin, configOwnerId, next, {
+      skipRuntime: true,
+      shopOwnerId: shopMeta.shopId,
+    });
     const persistErrors = (persistJson?.data?.metafieldsSet?.userErrors ?? []).map((e: any) =>
       String(e?.message ?? "Failed to save settings"),
     );
@@ -2210,7 +2262,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   config.hvac_rule.enabled =
     topHvacEnabled || hvacCombinationRules.some((r) => Boolean(r?.enabled));
 
-  const json = await persistConfig(admin, configOwnerId, config);
+  const json = await persistConfig(admin, configOwnerId, config, {
+    shopOwnerId: shopMeta.shopId,
+  });
   return {
     ok: (json?.data?.metafieldsSet?.userErrors ?? []).length === 0,
     errors: json?.data?.metafieldsSet?.userErrors ?? [],
