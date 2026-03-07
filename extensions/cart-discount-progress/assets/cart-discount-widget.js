@@ -117,6 +117,11 @@
                 <p class="cdp-recommendations-title">${escapeHtml(data.labels.recommendationHeading || "Recommended products")}</p>
                 <span class="cdp-count">${recommendations.length} pick${recommendations.length > 1 ? "s" : ""}</span>
               </div>
+              ${
+                data.labels && data.labels.pricingDisclaimer
+                  ? `<p class="cdp-reco-disclaimer">${escapeHtml(String(data.labels.pricingDisclaimer))}</p>`
+                  : ""
+              }
               ${recommendations
                 .map((item) => {
                   const variants = getRecommendationVariants(item);
@@ -178,8 +183,8 @@
                       }
                     </div>
                     <div class="cdp-reco-actions">
-                      <span class="cdp-price${selectedVariant.effectivelyFree ? " cdp-price-free" : ""}" data-cdp-net>
-                        ${selectedVariant.effectivelyFree ? "FREE*" : formatMoney(selectedVariant.estimatedNetPrice ?? selectedVariant.price)}
+                      <span class="cdp-price" data-cdp-net>
+                        Est. ${formatMoney(selectedVariant.estimatedNetPrice ?? selectedVariant.price)}
                       </span>
                       ${
                         hasSavings
@@ -188,7 +193,7 @@
                       }
                       ${
                         hasSavings
-                          ? `<span class="cdp-save" data-cdp-save>Save ~${formatMoney(selectedVariant.estimatedSavings)}</span>`
+                          ? `<span class="cdp-save" data-cdp-save>Est. save ~${formatMoney(selectedVariant.estimatedSavings)}</span>`
                           : `<span class="cdp-save" data-cdp-save hidden></span>`
                       }
                       <button type="button" class="cdp-btn" data-cdp-add data-variant-id="${selectedVariant.variantId}" data-product-id="${item.productId}">Add</button>
@@ -371,8 +376,8 @@
     if (button) button.setAttribute("data-variant-id", variantId);
     if (benefit) benefit.textContent = benefitLabel;
     if (net) {
-      net.textContent = effectivelyFree ? "FREE*" : formatMoney(estimatedNet);
-      net.classList.toggle("cdp-price-free", effectivelyFree);
+      net.textContent = `Est. ${formatMoney(estimatedNet)}`;
+      net.classList.toggle("cdp-price-free", effectivelyFree && estimatedNet <= 0.01);
     }
     if (compare) {
       if (estimatedSavings > 0) {
@@ -386,7 +391,7 @@
     if (save) {
       if (estimatedSavings > 0) {
         save.hidden = false;
-        save.textContent = `Save ~${formatMoney(estimatedSavings)}`;
+        save.textContent = `Est. save ~${formatMoney(estimatedSavings)}`;
       } else {
         save.hidden = true;
         save.textContent = "";

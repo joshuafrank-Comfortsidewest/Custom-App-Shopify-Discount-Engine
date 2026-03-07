@@ -871,13 +871,11 @@ function calculatePricingPreview({
   const projectedTier =
     [...tiers].reverse().find((tier) => subtotalAfterAdd >= tier.targetAmount) ?? null;
   const projectedPercent = projectedTier?.percent ?? currentPercent;
-  const oldTotalAfterDiscount = roundMoney(subtotal * (1 - currentPercent / 100));
-  const newTotalAfterDiscount = roundMoney(
-    subtotalAfterAdd * (1 - projectedPercent / 100),
+  const projectedItemNet = roundMoney(
+    Math.max(0, variantPrice * (1 - projectedPercent / 100)),
   );
-  const incrementalCost = roundMoney(newTotalAfterDiscount - oldTotalAfterDiscount);
-  const estimatedNetPrice = roundMoney(Math.max(0, incrementalCost));
-  const estimatedSavings = roundMoney(Math.max(0, variantPrice - incrementalCost));
+  const estimatedNetPrice = projectedItemNet;
+  const estimatedSavings = roundMoney(Math.max(0, variantPrice - projectedItemNet));
   const remainingAfterAdd = nextTier
     ? roundMoney(Math.max(0, nextTier.targetAmount - subtotalAfterAdd))
     : 0;
@@ -892,7 +890,7 @@ function calculatePricingPreview({
     estimatedNetPrice,
     estimatedSavings,
     unlocksNextTier,
-    effectivelyFree: incrementalCost <= 0,
+    effectivelyFree: projectedItemNet <= 0.01,
   };
 }
 
@@ -958,13 +956,13 @@ function buildBenefitLabel({
 }): string {
   if (preview.effectivelyFree) {
     if (preview.unlocksNextTier && preview.projectedTier) {
-      return `Effectively free if you unlock ${preview.projectedTier.code}`;
+      return `Estimated near $0 if ${preview.projectedTier.code} applies`;
     }
-    return "Effectively free with your current discount";
+    return "Estimated near $0 if qualifying discount applies";
   }
 
   if (preview.unlocksNextTier && preview.projectedTier) {
-    return `Unlock ${preview.projectedTier.code} and pay about ${formatMoney(preview.estimatedNetPrice, currency)} net`;
+    return `Unlock ${preview.projectedTier.code}: estimated ${formatMoney(preview.estimatedNetPrice, currency)} on this item`;
   }
 
   if (nextTier && amountRemaining > 0 && preview.remainingAfterAdd > 0) {
@@ -972,10 +970,10 @@ function buildBenefitLabel({
   }
 
   if (preview.projectedTier) {
-    return `Projected ${preview.projectedTier.code}: ${preview.projectedPercent}% discount`;
+    return `Estimated ${preview.projectedTier.code}: ${preview.projectedPercent}%`;
   }
 
-  return `Estimated net ${formatMoney(preview.estimatedNetPrice, currency)}`;
+  return `Estimated item net ${formatMoney(preview.estimatedNetPrice, currency)}`;
 }
 
 function getBasePriceCap({

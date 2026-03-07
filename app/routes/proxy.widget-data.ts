@@ -163,6 +163,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       : xyzHintEnabled && progress.amountRemaining > 0
         ? xyzHintMessage
         : null;
+  const pricingDisclaimer =
+    "Estimated savings only. Final discount is calculated by eligible promotions at cart/checkout.";
 
   return Response.json({
     subtotal,
@@ -182,6 +184,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         progress.nextTier && (progress.amountRemaining > 0 || useCurrentDiscountOverride)
           ? "Recommended to unlock next tier"
           : "Recommended for your cart",
+      pricingDisclaimer,
       configSource: engineTiers.length > 0 ? "smart_discount_engine" : "widget_settings",
     },
   });
