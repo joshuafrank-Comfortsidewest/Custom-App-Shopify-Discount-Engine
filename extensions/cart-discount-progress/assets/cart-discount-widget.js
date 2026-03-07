@@ -18,6 +18,7 @@
       this.root = root;
       this.settings = this.readSettings(root.dataset);
       this.latestResponse = null;
+      this.expandedRecommendations = false;
     }
 
     readSettings(dataset) {
@@ -54,6 +55,7 @@
         const cartLines = buildCartLines(cart);
         const accessoryHints = await resolveCartAccessoryHints(cartLines);
         const currentDiscountPercent = getCurrentDiscountPercent(cart);
+        const recommendationPoolSize = Math.max(this.settings.maxRecommendations, 6);
 
         const params = new URLSearchParams({
           subtotal: String((cart.items_subtotal_price || 0) / 100),
@@ -61,7 +63,7 @@
             (window.Shopify && window.Shopify.currency && window.Shopify.currency.active) ||
             "USD",
           tiers: this.settings.tiers,
-          maxRecommendations: String(this.settings.maxRecommendations),
+          maxRecommendations: String(recommendationPoolSize),
           nearThresholdPercent: String(this.settings.nearThresholdPercent),
           recommendationsEnabled: String(this.settings.recommendationsEnabled),
           xyzHintEnabled: String(this.settings.xyzHintEnabled),
@@ -103,6 +105,15 @@
 
     render(data) {
       const recommendations = Array.isArray(data.recommendations) ? data.recommendations : [];
+      const defaultVisibleCount = Math.max(1, Number(this.settings.maxRecommendations || 2));
+      if (!this.expandedRecommendations && recommendations.length <= defaultVisibleCount) {
+        this.expandedRecommendations = false;
+      }
+      const visibleCount = this.expandedRecommendations
+        ? recommendations.length
+        : Math.min(defaultVisibleCount, recommendations.length);
+      const visibleRecommendations = recommendations.slice(0, visibleCount);
+      const remainingRecommendationCount = Math.max(0, recommendations.length - visibleCount);
       const currentTierText = data.currentTier
         ? `${data.currentTier.code} (${data.currentTier.percent}%)`
         : "None";
@@ -122,7 +133,7 @@
                   ? `<p class="cdp-reco-disclaimer">${escapeHtml(String(data.labels.pricingDisclaimer))}</p>`
                   : ""
               }
-              ${recommendations
+              ${visibleRecommendations
                 .map((item) => {
                   const variants = getRecommendationVariants(item);
                   const selectedVariant =
@@ -202,6 +213,13 @@
                 `;
                 })
                 .join("")}
+              ${
+                remainingRecommendationCount > 0
+                  ? `<button type="button" class="cdp-more-btn" data-cdp-more-picks>Show ${Math.min(defaultVisibleCount, remainingRecommendationCount)} more picks</button>`
+                  : this.expandedRecommendations && recommendations.length > defaultVisibleCount
+                    ? `<button type="button" class="cdp-more-btn cdp-more-btn-less" data-cdp-less-picks>Show fewer picks</button>`
+                    : ""
+              }
             </div>
           `
           : "";
@@ -232,6 +250,22 @@
     }
 
     bindActions() {
+      const moreButton = this.root.querySelector("[data-cdp-more-picks]");
+      if (moreButton) {
+        moreButton.addEventListener("click", () => {
+          this.expandedRecommendations = true;
+          if (this.latestResponse) this.render(this.latestResponse);
+        });
+      }
+
+      const lessButton = this.root.querySelector("[data-cdp-less-picks]");
+      if (lessButton) {
+        lessButton.addEventListener("click", () => {
+          this.expandedRecommendations = false;
+          if (this.latestResponse) this.render(this.latestResponse);
+        });
+      }
+
       this.root.querySelectorAll("[data-cdp-variant-select]").forEach((select) => {
         select.addEventListener("change", (event) => {
           syncRecommendationVariantState(event.currentTarget);
@@ -409,6 +443,7 @@
         return {
           productId,
           variantId,
+          quantity: Math.max(1, Number(item.quantity || 1)),
           sku: String(item.sku || "").trim(),
           handle: normalizeHandle(item.handle || item.product_handle || ""),
         };

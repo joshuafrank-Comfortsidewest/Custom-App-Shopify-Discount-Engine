@@ -31,6 +31,11 @@ type RecommenderConfig = {
   nearThresholdPercent: number;
 };
 
+export type CartLineForPreview = {
+  variantId: string;
+  quantity: number;
+};
+
 export type AccessoryContextLink = {
   productId: string;
   handle: string;
@@ -97,6 +102,9 @@ type RecommendationCandidate = {
 };
 
 const DEFAULT_TIERS = "100:5,250:10,400:13,600:15";
+const SHADOW_CART_CACHE_TTL_MS = 90 * 1000;
+const SHADOW_CART_MAX_PREVIEW_ITEMS = 2;
+const SHADOW_CART_CACHE = new Map<string, { expiresAt: number; subtotal: number }>();
 
 type EngineConfigTierPayload = {
   toggles?: {
@@ -543,6 +551,98 @@ export function parseNumber(value: string | null, defaultValue: number): number 
   return Number.isFinite(parsed) ? parsed : defaultValue;
 }
 
+export async function applyShadowCartExactPricing({
+  shop,
+  currency,
+  cartLines,
+  recommendations,
+}: {
+  shop: string | null;
+  currency: string;
+  cartLines: CartLineForPreview[];
+  recommendations: WidgetRecommendation[];
+}): Promise<WidgetRecommendation[]> {
+  const normalizedShop = String(shop || "").trim().toLowerCase();
+  if (!normalizedShop || recommendations.length === 0 || cartLines.length === 0) {
+    return recommendations;
+  }
+
+  const storefrontToken = String(process.env.SHOPIFY_STOREFRONT_ACCESS_TOKEN || "").trim();
+  if (!storefrontToken) {
+    return recommendations;
+  }
+
+  const cartSeed = cartLines
+    .map((line) => ({
+      variantGid: toVariantGid(line.variantId),
+      quantity: Math.max(1, Math.floor(Number(line.quantity || 1))),
+    }))
+    .filter((line): line is { variantGid: string; quantity: number } => Boolean(line.variantGid));
+  if (cartSeed.length === 0) {
+    return recommendations;
+  }
+
+  const storefrontApiVersion =
+    String(process.env.SHOPIFY_STOREFRONT_API_VERSION || "").trim() || "2025-10";
+  const cartHash = getShadowCartHash(cartSeed);
+  const baseSubtotal = await getShadowCartSubtotal({
+    shop: normalizedShop,
+    apiVersion: storefrontApiVersion,
+    storefrontToken,
+    lines: cartSeed,
+    cacheKey: `${normalizedShop}|${cartHash}|base`,
+  });
+  if (!Number.isFinite(baseSubtotal) || baseSubtotal < 0) {
+    return recommendations;
+  }
+
+  const enriched = recommendations.map((item) => ({
+    ...item,
+    variants: Array.isArray(item.variants) ? [...item.variants] : [],
+  }));
+
+  for (let i = 0; i < Math.min(enriched.length, SHADOW_CART_MAX_PREVIEW_ITEMS); i += 1) {
+    const recommendation = enriched[i];
+    const variantGid = toVariantGid(recommendation.variantId);
+    if (!variantGid) continue;
+
+    const scenarioLines = [...cartSeed, { variantGid, quantity: 1 }];
+    const scenarioSubtotal = await getShadowCartSubtotal({
+      shop: normalizedShop,
+      apiVersion: storefrontApiVersion,
+      storefrontToken,
+      lines: scenarioLines,
+      cacheKey: `${normalizedShop}|${cartHash}|${variantGid}|1`,
+    });
+    if (!Number.isFinite(scenarioSubtotal) || scenarioSubtotal < baseSubtotal) {
+      continue;
+    }
+
+    const exactNet = roundMoney(Math.max(0, scenarioSubtotal - baseSubtotal));
+    const exactSavings = roundMoney(Math.max(0, recommendation.price - exactNet));
+    const exactFree = exactNet <= 0.01;
+    recommendation.estimatedNetPrice = exactNet;
+    recommendation.estimatedSavings = exactSavings;
+    recommendation.effectivelyFree = exactFree;
+    recommendation.benefitLabel = `Exact preview: ${formatMoney(exactNet, currency)} with current cart`;
+
+    const variantIndex = recommendation.variants.findIndex(
+      (variant) => String(variant.variantId) === String(recommendation.variantId),
+    );
+    if (variantIndex >= 0) {
+      recommendation.variants[variantIndex] = {
+        ...recommendation.variants[variantIndex],
+        estimatedNetPrice: exactNet,
+        estimatedSavings: exactSavings,
+        effectivelyFree: exactFree,
+        benefitLabel: recommendation.benefitLabel,
+      };
+    }
+  }
+
+  return enriched;
+}
+
 function buildAccessorySourceMaps(accessoryContext: AccessoryContextLink[]): {
   byProductId: Map<string, Set<string>>;
   byHandle: Map<string, Set<string>>;
@@ -678,6 +778,136 @@ function humanizeHandle(handle: string): string {
         : `${segment.charAt(0).toUpperCase()}${segment.slice(1)}`,
     )
     .join(" ");
+}
+
+async function getShadowCartSubtotal({
+  shop,
+  apiVersion,
+  storefrontToken,
+  lines,
+  cacheKey,
+}: {
+  shop: string;
+  apiVersion: string;
+  storefrontToken: string;
+  lines: Array<{ variantGid: string; quantity: number }>;
+  cacheKey: string;
+}): Promise<number> {
+  const now = Date.now();
+  const cached = SHADOW_CART_CACHE.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cached.subtotal;
+  }
+
+  const subtotal = await requestShadowCartSubtotal({
+    shop,
+    apiVersion,
+    storefrontToken,
+    lines,
+  });
+  if (!Number.isFinite(subtotal)) {
+    return Number.NaN;
+  }
+
+  SHADOW_CART_CACHE.set(cacheKey, {
+    expiresAt: now + SHADOW_CART_CACHE_TTL_MS,
+    subtotal,
+  });
+
+  if (SHADOW_CART_CACHE.size > 500) {
+    for (const [key, entry] of SHADOW_CART_CACHE.entries()) {
+      if (entry.expiresAt <= now) SHADOW_CART_CACHE.delete(key);
+      if (SHADOW_CART_CACHE.size <= 350) break;
+    }
+  }
+
+  return subtotal;
+}
+
+async function requestShadowCartSubtotal({
+  shop,
+  apiVersion,
+  storefrontToken,
+  lines,
+}: {
+  shop: string;
+  apiVersion: string;
+  storefrontToken: string;
+  lines: Array<{ variantGid: string; quantity: number }>;
+}): Promise<number> {
+  const endpoint = `https://${shop}/api/${apiVersion}/graphql.json`;
+  const payload = {
+    query: `#graphql
+      mutation ShadowCartPreview($lines: [CartLineInput!]) {
+        cartCreate(input: { lines: $lines }) {
+          cart {
+            cost {
+              subtotalAmount {
+                amount
+                currencyCode
+              }
+            }
+          }
+          userErrors {
+            message
+          }
+        }
+      }
+    `,
+    variables: {
+      lines: lines.map((line) => ({
+        merchandiseId: line.variantGid,
+        quantity: line.quantity,
+      })),
+    },
+  };
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Storefront-Access-Token": storefrontToken,
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) return Number.NaN;
+
+    const json = (await response.json()) as {
+      data?: {
+        cartCreate?: {
+          cart?: {
+            cost?: {
+              subtotalAmount?: {
+                amount?: string;
+              };
+            };
+          };
+          userErrors?: Array<{ message?: string }>;
+        };
+      };
+    };
+
+    const amount = Number(json.data?.cartCreate?.cart?.cost?.subtotalAmount?.amount ?? Number.NaN);
+    return Number.isFinite(amount) ? roundMoney(amount) : Number.NaN;
+  } catch {
+    return Number.NaN;
+  }
+}
+
+function getShadowCartHash(lines: Array<{ variantGid: string; quantity: number }>): string {
+  return [...lines]
+    .sort((a, b) => a.variantGid.localeCompare(b.variantGid))
+    .map((line) => `${line.variantGid}:${line.quantity}`)
+    .join("|");
+}
+
+function toVariantGid(idOrGid: string): string | null {
+  const raw = String(idOrGid || "").trim();
+  if (!raw) return null;
+  if (raw.startsWith("gid://shopify/ProductVariant/")) return raw;
+  const numeric = extractNumericId(raw);
+  return numeric ? `gid://shopify/ProductVariant/${numeric}` : null;
 }
 
 async function fetchPreferredProducts({

@@ -122,6 +122,25 @@
   line-height: 1.35;
 }
 
+.cdp-more-btn {
+  margin-top: 10px;
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid rgba(14, 165, 233, 0.35);
+  background: rgba(224, 242, 254, 0.45);
+  color: #075985;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cdp-more-btn-less {
+  border-color: rgba(100, 116, 139, 0.35);
+  background: rgba(241, 245, 249, 0.65);
+  color: #334155;
+}
+
 .cdp-count {
   font-size: 11px;
   font-weight: 700;

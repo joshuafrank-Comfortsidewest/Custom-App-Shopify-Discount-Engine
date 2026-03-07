@@ -2,6 +2,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import {
   type AccessoryContextLink,
+  applyShadowCartExactPricing,
   fetchEngineConfiguredTiers,
   fetchRecommendedProducts,
   formatMoney,
@@ -19,6 +20,7 @@ type CartLinePayload = {
   variantId: string;
   sku: string;
   handle: string;
+  quantity: number;
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -126,7 +128,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       currentDiscountPercent + 0.1 < subtotalImpliedTier.percent,
   );
 
-  const recommendations = recommendationsEnabled
+  let recommendations = recommendationsEnabled
       ? await fetchRecommendedProducts({
           admin,
           subtotal,
@@ -144,6 +146,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           config: { maxRecommendations, nearThresholdPercent },
         })
     : [];
+
+  recommendations = await applyShadowCartExactPricing({
+    shop: url.searchParams.get("shop"),
+    currency,
+    cartLines: cartLines.map((line) => ({
+      variantId: line.variantId,
+      quantity: line.quantity,
+    })),
+    recommendations,
+  });
 
   const primaryMessage = useCurrentDiscountOverride
     ? progress.nextTier
@@ -164,7 +176,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         ? xyzHintMessage
         : null;
   const pricingDisclaimer =
-    "Estimated savings only. Final discount is calculated by eligible promotions at cart/checkout.";
+    "Top picks use exact preview when available. Final discount is always determined at cart/checkout.";
 
   return Response.json({
     subtotal,
@@ -213,6 +225,7 @@ function parseCartLines(raw: string | null): CartLinePayload[] {
           variantId: String(entry?.variantId || "").trim(),
           sku: String(entry?.sku || "").trim(),
           handle: String(entry?.handle || "").trim().toLowerCase(),
+          quantity: Math.max(1, Math.floor(parseNumber(String(entry?.quantity ?? "1"), 1))),
         };
       })
       .filter((line): line is CartLinePayload => line !== null);
