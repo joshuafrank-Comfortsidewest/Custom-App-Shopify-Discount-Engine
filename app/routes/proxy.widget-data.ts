@@ -186,6 +186,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return Response.json({
     subtotal,
     currency,
+    tiers,
     currentDiscountPercent,
     currentTier: progress.currentTier,
     nextTier: progress.nextTier,
@@ -203,6 +204,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           : "Recommended for your cart",
       pricingDisclaimer,
       configSource: engineTiers.length > 0 ? "smart_discount_engine" : "widget_settings",
+      exactPreviewCount,
     },
   });
 };

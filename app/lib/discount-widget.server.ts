@@ -106,7 +106,7 @@ type RecommendationCandidate = {
 const DEFAULT_TIERS = "100:5,250:10,400:13,600:15";
 const SHADOW_CART_CACHE_TTL_MS = 90 * 1000;
 const SHADOW_CART_MAX_PREVIEW_ITEMS = 2;
-const SHADOW_CART_MAX_PREVIEW_VARIANTS = 4;
+const SHADOW_CART_MAX_PREVIEW_VARIANTS = 2;
 const SHADOW_CART_CACHE = new Map<string, { expiresAt: number; subtotal: number }>();
 
 type EngineConfigTierPayload = {
@@ -610,39 +610,49 @@ export async function applyShadowCartExactPricing({
   for (let i = 0; i < Math.min(enriched.length, SHADOW_CART_MAX_PREVIEW_ITEMS); i += 1) {
     const recommendation = enriched[i];
     const variantsToPreview = recommendation.variants.slice(0, SHADOW_CART_MAX_PREVIEW_VARIANTS);
-    for (const variant of variantsToPreview) {
-      const variantGid = toVariantGid(variant.variantId);
-      if (!variantGid) continue;
+    const previewResults = await Promise.all(
+      variantsToPreview.map(async (variant) => {
+        const variantGid = toVariantGid(variant.variantId);
+        if (!variantGid) {
+          return { variantId: variant.variantId, exactSubtotal: Number.NaN };
+        }
 
-      const scenarioLines = [...cartSeed, { variantGid, quantity: 1 }];
-      const scenarioSubtotal = await getShadowCartSubtotal({
-        shop: normalizedShop,
-        apiVersion: storefrontApiVersion,
-        storefrontToken,
-        lines: scenarioLines,
-        cacheKey: `${normalizedShop}|${cartHash}|${variantGid}|1`,
-      });
-      if (!Number.isFinite(scenarioSubtotal) || scenarioSubtotal < baseSubtotal) {
-        continue;
-      }
+        const scenarioLines = [...cartSeed, { variantGid, quantity: 1 }];
+        const scenarioSubtotal = await getShadowCartSubtotal({
+          shop: normalizedShop,
+          apiVersion: storefrontApiVersion,
+          storefrontToken,
+          lines: scenarioLines,
+          cacheKey: `${normalizedShop}|${cartHash}|${variantGid}|1`,
+        });
 
-      const exactNet = roundMoney(Math.max(0, scenarioSubtotal - baseSubtotal));
-      const exactSavings = roundMoney(Math.max(0, variant.price - exactNet));
-      const exactFree = exactNet <= 0.01;
-      const exactBenefit = `Exact preview: ${formatMoney(exactNet, currency)} with current cart`;
-      const variantIndex = recommendation.variants.findIndex(
-        (entry) => String(entry.variantId) === String(variant.variantId),
-      );
-      if (variantIndex >= 0) {
-        recommendation.variants[variantIndex] = {
-          ...recommendation.variants[variantIndex],
-          estimatedNetPrice: exactNet,
-          estimatedSavings: exactSavings,
-          effectivelyFree: exactFree,
-          benefitLabel: exactBenefit,
-          pricingSource: "exact",
+        return {
+          variantId: variant.variantId,
+          exactSubtotal: scenarioSubtotal,
         };
-      }
+      }),
+    );
+
+    for (const result of previewResults) {
+      if (!Number.isFinite(result.exactSubtotal) || result.exactSubtotal < baseSubtotal) continue;
+
+      const variantIndex = recommendation.variants.findIndex(
+        (entry) => String(entry.variantId) === String(result.variantId),
+      );
+      if (variantIndex < 0) continue;
+
+      const variantPrice = recommendation.variants[variantIndex].price;
+      const exactNet = roundMoney(Math.max(0, result.exactSubtotal - baseSubtotal));
+      const exactSavings = roundMoney(Math.max(0, variantPrice - exactNet));
+      const exactFree = exactNet <= 0.01;
+      recommendation.variants[variantIndex] = {
+        ...recommendation.variants[variantIndex],
+        estimatedNetPrice: exactNet,
+        estimatedSavings: exactSavings,
+        effectivelyFree: exactFree,
+        benefitLabel: `Exact preview with current cart: ${formatMoney(exactNet, currency)}`,
+        pricingSource: "exact",
+      };
     }
 
     const selectedVariant = recommendation.variants.find(
@@ -1201,15 +1211,8 @@ function buildBenefitLabel({
   amountRemaining: number;
   currency: string;
 }): string {
-  if (preview.effectivelyFree) {
-    if (preview.unlocksNextTier && preview.projectedTier) {
-      return `Estimated near $0 if ${preview.projectedTier.code} applies`;
-    }
-    return "Estimated near $0 if qualifying discount applies";
-  }
-
   if (preview.unlocksNextTier && preview.projectedTier) {
-    return `Unlock ${preview.projectedTier.code}: estimated ${formatMoney(preview.estimatedNetPrice, currency)} on this item`;
+    return `Can unlock ${preview.projectedTier.code} with qualifying items`;
   }
 
   if (nextTier && amountRemaining > 0 && preview.remainingAfterAdd > 0) {
@@ -1217,10 +1220,10 @@ function buildBenefitLabel({
   }
 
   if (preview.projectedTier) {
-    return `Estimated ${preview.projectedTier.code}: ${preview.projectedPercent}%`;
+    return `May qualify for ${preview.projectedTier.code} discount tier`;
   }
 
-  return `Estimated item net ${formatMoney(preview.estimatedNetPrice, currency)}`;
+  return "Final discount is calculated at checkout";
 }
 
 function getBasePriceCap({

@@ -55,7 +55,7 @@
         const cartLines = buildCartLines(cart);
         const accessoryHints = await resolveCartAccessoryHints(cartLines);
         const currentDiscountPercent = getCurrentDiscountPercent(cart);
-        const recommendationPoolSize = Math.max(this.settings.maxRecommendations, 6);
+        const recommendationPoolSize = Math.max(this.settings.maxRecommendations + 2, 4);
 
         const params = new URLSearchParams({
           subtotal: String((cart.items_subtotal_price || 0) / 100),
@@ -120,6 +120,24 @@
       const nextTierText = data.nextTier
         ? `${data.nextTier.code} (${data.nextTier.percent}%)`
         : "Highest reached";
+      const currentDiscountPercent = Number(data.currentDiscountPercent || 0);
+      const tiers = Array.isArray(data.tiers) ? data.tiers : [];
+      const maxTierPercent = tiers.length > 0
+        ? Math.max(...tiers.map((tier) => Number(tier && tier.percent) || 0), 1)
+        : 15;
+      const tierMarkers = tiers
+        .map((tier) => {
+          const tierPercent = Number(tier && tier.percent) || 0;
+          const left = Math.max(0, Math.min(100, (tierPercent / maxTierPercent) * 100));
+          const isReached = currentDiscountPercent + 0.001 >= tierPercent;
+          return `
+            <span class="cdp-tier-marker ${isReached ? "cdp-tier-marker--reached" : ""}" style="left:${left}%">
+              <span class="cdp-tier-marker-dot"></span>
+              <span class="cdp-tier-marker-label">${escapeHtml(String(tierPercent))}%</span>
+            </span>
+          `;
+        })
+        .join("");
       const recommendationHtml =
         this.settings.recommendationsEnabled && recommendations.length > 0
           ? `
@@ -141,6 +159,9 @@
                     variants[0];
                   const isExact = String(selectedVariant.pricingSource || item.pricingSource || "estimated") === "exact";
                   const hasSavings = isExact && Number(selectedVariant.estimatedSavings || 0) > 0;
+                  const displayPrice = isExact
+                    ? Number(selectedVariant.estimatedNetPrice ?? selectedVariant.price)
+                    : Number(selectedVariant.price || 0);
                   const recommendedForText = getRecommendedForText(item.recommendedFor);
 
                   return `
@@ -202,7 +223,7 @@
                     </div>
                     <div class="cdp-reco-actions">
                       <span class="cdp-price" data-cdp-net>
-                        ${isExact ? "Exact" : "Est."} ${formatMoney(selectedVariant.estimatedNetPrice ?? selectedVariant.price)}
+                        ${isExact ? "Exact" : "Price"} ${formatMoney(displayPrice)}
                       </span>
                       ${
                         hasSavings
@@ -211,7 +232,7 @@
                       }
                       ${
                         hasSavings
-                          ? `<span class="cdp-save" data-cdp-save>Est. save ~${formatMoney(selectedVariant.estimatedSavings)}</span>`
+                          ? `<span class="cdp-save" data-cdp-save>Save ~${formatMoney(selectedVariant.estimatedSavings)}</span>`
                           : `<span class="cdp-save" data-cdp-save hidden></span>`
                       }
                       <button type="button" class="cdp-btn" data-cdp-add data-variant-id="${selectedVariant.variantId}" data-product-id="${item.productId}">Add</button>
@@ -244,6 +265,21 @@
           }
           <div class="cdp-progress">
             <div class="cdp-progress-bar" style="width:${Math.max(0, Math.min(100, data.journeyProgressPercent ?? data.progressPercent ?? 0))}%"></div>
+            <div class="cdp-tier-markers">${tierMarkers}</div>
+          </div>
+          <div class="cdp-stats">
+            <div class="cdp-stat">
+              <span class="cdp-stat-label">Current discount</span>
+              <span class="cdp-stat-value">${escapeHtml(formatPercent(currentDiscountPercent))}</span>
+            </div>
+            <div class="cdp-stat">
+              <span class="cdp-stat-label">Next tier</span>
+              <span class="cdp-stat-value">${escapeHtml(nextTierText)}</span>
+            </div>
+            <div class="cdp-stat">
+              <span class="cdp-stat-label">Spend to unlock</span>
+              <span class="cdp-stat-value">${Number(data.amountRemaining || 0) > 0 ? escapeHtml(formatMoney(data.amountRemaining || 0)) : "Unlocked"}</span>
+            </div>
           </div>
           <div class="cdp-tier-row">
             <span class="cdp-tier-pill">Current: ${escapeHtml(currentTierText)}</span>
@@ -349,6 +385,12 @@
     return MONEY_FORMATTER.format(Number(amount || 0));
   }
 
+  function formatPercent(value) {
+    const num = Number(value || 0);
+    const rounded = Math.round(num * 100) / 100;
+    return Number.isInteger(rounded) ? `${rounded}%` : `${rounded.toFixed(2)}%`;
+  }
+
   function escapeHtml(value) {
     return String(value || "")
       .replaceAll("&", "&amp;")
@@ -428,8 +470,9 @@
       accuracy.classList.toggle("cdp-reco-accuracy--exact", hasExact);
     }
     if (net) {
-      net.textContent = `${hasExact ? "Exact" : "Est."} ${formatMoney(estimatedNet)}`;
-      net.classList.toggle("cdp-price-free", effectivelyFree && estimatedNet <= 0.01);
+      const displayNet = hasExact ? estimatedNet : price;
+      net.textContent = `${hasExact ? "Exact" : "Price"} ${formatMoney(displayNet)}`;
+      net.classList.toggle("cdp-price-free", hasExact && effectivelyFree && estimatedNet <= 0.01);
     }
     if (compare) {
       if (hasSavings) {
