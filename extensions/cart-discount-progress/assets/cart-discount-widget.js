@@ -67,9 +67,17 @@
           xyzHintEnabled: String(this.settings.xyzHintEnabled),
           xyzHintMessage: this.settings.xyzHintMessage,
           cartProductIds: cartLines.map((line) => line.productId).join(","),
+          cartVariantIds: cartLines.map((line) => line.variantId).join(","),
           cartLines: JSON.stringify(cartLines),
           preferredAccessoryProductIds: accessoryHints.productIds.join(","),
           preferredAccessoryHandles: accessoryHints.handles.join(","),
+          accessoryContext: JSON.stringify(
+            (accessoryHints.links || []).map((link) => ({
+              p: link.productId || "",
+              h: link.handle || "",
+              s: link.sourceHandle || "",
+            })),
+          ),
           excludeVariantIds: getFailedVariantIds().join(","),
           currentDiscountPercent: String(currentDiscountPercent),
         });
@@ -110,8 +118,15 @@
                 <span class="cdp-count">${recommendations.length} pick${recommendations.length > 1 ? "s" : ""}</span>
               </div>
               ${recommendations
-                .map(
-                  (item) => `
+                .map((item) => {
+                  const variants = getRecommendationVariants(item);
+                  const selectedVariant =
+                    variants.find((entry) => String(entry.variantId) === String(item.variantId)) ||
+                    variants[0];
+                  const hasSavings = Number(selectedVariant.estimatedSavings || 0) > 0;
+                  const recommendedForText = getRecommendedForText(item.recommendedFor);
+
+                  return `
                   <div class="cdp-reco-item">
                     ${
                       item.imageUrl
@@ -119,32 +134,68 @@
                         : `<div class="cdp-reco-fallback">+</div>`
                     }
                     <div class="cdp-reco-content">
+                      <div class="cdp-reco-title-row">
+                        <span class="cdp-reco-type">${escapeHtml(item.recommendationType || "Accessory")}</span>
+                      </div>
                       ${
                         item.productUrl
                           ? `<a class="cdp-reco-title" href="${item.productUrl}">${escapeHtml(item.title)}</a>`
                           : `<span class="cdp-reco-title">${escapeHtml(item.title)}</span>`
                       }
-                      <p class="cdp-reco-meta">${escapeHtml(item.benefitLabel)}</p>
+                      <p class="cdp-reco-meta" data-cdp-benefit>${escapeHtml(selectedVariant.benefitLabel || item.benefitLabel || "")}</p>
+                      ${
+                        recommendedForText
+                          ? `<p class="cdp-reco-for">Recommended for ${escapeHtml(recommendedForText)}</p>`
+                          : ""
+                      }
+                      ${
+                        variants.length > 1
+                          ? `
+                            <label class="cdp-variant-label">
+                              Option
+                              <select class="cdp-variant-select" data-cdp-variant-select>
+                                ${variants
+                                  .map(
+                                    (variant) => `
+                                      <option
+                                        value="${escapeAttr(String(variant.variantId))}"
+                                        ${String(variant.variantId) === String(selectedVariant.variantId) ? "selected" : ""}
+                                        data-price="${Number(variant.price || 0)}"
+                                        data-net="${Number(variant.estimatedNetPrice || 0)}"
+                                        data-savings="${Number(variant.estimatedSavings || 0)}"
+                                        data-benefit="${escapeAttr(String(variant.benefitLabel || ""))}"
+                                        data-free="${variant.effectivelyFree ? "1" : "0"}"
+                                      >
+                                        ${escapeHtml(getVariantOptionLabel(variant))}
+                                      </option>
+                                    `,
+                                  )
+                                  .join("")}
+                              </select>
+                            </label>
+                          `
+                          : ""
+                      }
                     </div>
                     <div class="cdp-reco-actions">
-                      <span class="cdp-price${item.effectivelyFree ? " cdp-price-free" : ""}">
-                        ${item.effectivelyFree ? "FREE*" : formatMoney(item.estimatedNetPrice ?? item.price)}
+                      <span class="cdp-price${selectedVariant.effectivelyFree ? " cdp-price-free" : ""}" data-cdp-net>
+                        ${selectedVariant.effectivelyFree ? "FREE*" : formatMoney(selectedVariant.estimatedNetPrice ?? selectedVariant.price)}
                       </span>
                       ${
-                        Number(item.estimatedSavings || 0) > 0
-                          ? `<span class="cdp-price-compare">${formatMoney(item.price)}</span>`
-                          : ""
+                        hasSavings
+                          ? `<span class="cdp-price-compare" data-cdp-compare>${formatMoney(selectedVariant.price)}</span>`
+                          : `<span class="cdp-price-compare" data-cdp-compare hidden></span>`
                       }
                       ${
-                        Number(item.estimatedSavings || 0) > 0
-                          ? `<span class="cdp-save">Save ~${formatMoney(item.estimatedSavings)}</span>`
-                          : ""
+                        hasSavings
+                          ? `<span class="cdp-save" data-cdp-save>Save ~${formatMoney(selectedVariant.estimatedSavings)}</span>`
+                          : `<span class="cdp-save" data-cdp-save hidden></span>`
                       }
-                      <button type="button" class="cdp-btn" data-cdp-add data-variant-id="${item.variantId}" data-product-id="${item.productId}">Add</button>
+                      <button type="button" class="cdp-btn" data-cdp-add data-variant-id="${selectedVariant.variantId}" data-product-id="${item.productId}">Add</button>
                     </div>
                   </div>
-                `,
-                )
+                `;
+                })
                 .join("")}
             </div>
           `
@@ -176,6 +227,12 @@
     }
 
     bindActions() {
+      this.root.querySelectorAll("[data-cdp-variant-select]").forEach((select) => {
+        select.addEventListener("change", (event) => {
+          syncRecommendationVariantState(event.currentTarget);
+        });
+      });
+
       this.root.querySelectorAll("[data-cdp-add]").forEach((button) => {
         button.addEventListener("click", async (event) => {
           const variantId = event.currentTarget.getAttribute("data-variant-id");
@@ -255,6 +312,88 @@
       .replaceAll("'", "&#39;");
   }
 
+  function escapeAttr(value) {
+    return escapeHtml(value).replaceAll("`", "&#96;");
+  }
+
+  function getRecommendationVariants(item) {
+    const variants = Array.isArray(item && item.variants) ? item.variants : [];
+    if (variants.length > 0) return variants;
+
+    return [
+      {
+        variantId: item.variantId,
+        variantTitle: item.variantTitle,
+        price: Number(item.price || 0),
+        estimatedNetPrice: Number(item.estimatedNetPrice || item.price || 0),
+        estimatedSavings: Number(item.estimatedSavings || 0),
+        effectivelyFree: Boolean(item.effectivelyFree),
+        benefitLabel: item.benefitLabel || "",
+      },
+    ];
+  }
+
+  function getVariantOptionLabel(variant) {
+    const title = String(variant && variant.variantTitle ? variant.variantTitle : "").trim();
+    const normalized = title.toLowerCase();
+    const base = !title || normalized === "default title" ? "Default option" : title;
+    return `${base} - ${formatMoney(Number(variant.price || 0))}`;
+  }
+
+  function getRecommendedForText(items) {
+    if (!Array.isArray(items) || items.length === 0) return "";
+    const clean = items.map((item) => String(item || "").trim()).filter(Boolean);
+    if (clean.length === 0) return "";
+    if (clean.length <= 2) return clean.join(" + ");
+    return `${clean.slice(0, 2).join(" + ")} +${clean.length - 2} more`;
+  }
+
+  function syncRecommendationVariantState(select) {
+    const row = select && select.closest ? select.closest(".cdp-reco-item") : null;
+    if (!row) return;
+
+    const selectedOption = select.selectedOptions && select.selectedOptions[0];
+    if (!selectedOption) return;
+
+    const button = row.querySelector("[data-cdp-add]");
+    const benefit = row.querySelector("[data-cdp-benefit]");
+    const net = row.querySelector("[data-cdp-net]");
+    const compare = row.querySelector("[data-cdp-compare]");
+    const save = row.querySelector("[data-cdp-save]");
+
+    const variantId = selectedOption.value;
+    const price = Number(selectedOption.getAttribute("data-price") || 0);
+    const estimatedNet = Number(selectedOption.getAttribute("data-net") || price);
+    const estimatedSavings = Number(selectedOption.getAttribute("data-savings") || 0);
+    const benefitLabel = String(selectedOption.getAttribute("data-benefit") || "");
+    const effectivelyFree = selectedOption.getAttribute("data-free") === "1";
+
+    if (button) button.setAttribute("data-variant-id", variantId);
+    if (benefit) benefit.textContent = benefitLabel;
+    if (net) {
+      net.textContent = effectivelyFree ? "FREE*" : formatMoney(estimatedNet);
+      net.classList.toggle("cdp-price-free", effectivelyFree);
+    }
+    if (compare) {
+      if (estimatedSavings > 0) {
+        compare.hidden = false;
+        compare.textContent = formatMoney(price);
+      } else {
+        compare.hidden = true;
+        compare.textContent = "";
+      }
+    }
+    if (save) {
+      if (estimatedSavings > 0) {
+        save.hidden = false;
+        save.textContent = `Save ~${formatMoney(estimatedSavings)}`;
+      } else {
+        save.hidden = true;
+        save.textContent = "";
+      }
+    }
+  }
+
   function buildCartLines(cart) {
     return (cart.items || [])
       .map((item) => {
@@ -287,71 +426,88 @@
 
   async function resolveCartAccessoryHints(cartLines) {
     if (!Array.isArray(cartLines) || cartLines.length === 0) {
-      return { productIds: [], handles: [] };
-    }
-
-    const skus = normalizeAndDedupeSkus(
-      "",
-      cartLines.map((line) => line.sku).filter(Boolean),
-    );
-    if (skus.length === 0) {
-      return { productIds: [], handles: [] };
+      return { productIds: [], handles: [], links: [] };
     }
 
     const tecinfoMap = await loadTecinfoMap(cartLines);
     if (!tecinfoMap) {
-      return { productIds: [], handles: [] };
-    }
-
-    const matchedRecords = [];
-    const seenRecordSkus = new Set();
-
-    skus.forEach((sku) => {
-      const expanded = [sku, ...deriveMrCoolComponents(sku)];
-      expanded.forEach((candidateSku) => {
-        const key = String(candidateSku || "").toUpperCase();
-        if (!key) return;
-
-        let record = tecinfoMap[key] || null;
-        if (!record) {
-          record = fuzzyFindMrCoolRecord(key, tecinfoMap);
-        }
-        if (!record || seenRecordSkus.has(String(record.sku || "").toUpperCase())) return;
-
-        const accessories = normalizeAccessoryList(record.accessories || []);
-        if (accessories.length === 0) return;
-
-        seenRecordSkus.add(String(record.sku || "").toUpperCase());
-        matchedRecords.push(record);
-      });
-    });
-
-    if (matchedRecords.length === 0) {
-      return { productIds: [], handles: [] };
+      return { productIds: [], handles: [], links: [] };
     }
 
     const productIds = [];
     const handles = [];
+    const links = [];
     const seenProducts = new Set();
     const seenHandles = new Set();
+    const seenLinks = new Set();
+    const seenSourceRecord = new Set();
 
-    matchedRecords.forEach((record) => {
-      const accessories = normalizeAccessoryList(record.accessories || []);
-      accessories.forEach((item) => {
-        if (item.productId && !seenProducts.has(item.productId)) {
-          seenProducts.add(item.productId);
-          productIds.push(item.productId);
-        }
-        if (item.handle && !seenHandles.has(item.handle)) {
-          seenHandles.add(item.handle);
-          handles.push(item.handle);
-        }
+    cartLines.forEach((line) => {
+      const sourceHandle = normalizeHandle(line && line.handle);
+      const sourceProductId = String((line && line.productId) || "").trim();
+      if (!sourceHandle && !sourceProductId) return;
+
+      const lineSkus = normalizeAndDedupeSkus("", [line.sku].filter(Boolean));
+      if (lineSkus.length === 0) return;
+
+      lineSkus.forEach((sku) => {
+        const expanded = [sku, ...deriveMrCoolComponents(sku)];
+
+        expanded.forEach((candidateSku) => {
+          const key = String(candidateSku || "").toUpperCase();
+          if (!key) return;
+
+          let record = tecinfoMap[key] || null;
+          if (!record) {
+            record = fuzzyFindMrCoolRecord(key, tecinfoMap);
+          }
+          if (!record) return;
+
+          const sourceRecordKey = `${sourceProductId || sourceHandle}::${String(record.sku || "").toUpperCase()}`;
+          if (seenSourceRecord.has(sourceRecordKey)) return;
+          seenSourceRecord.add(sourceRecordKey);
+
+          const accessories = normalizeAccessoryList(record.accessories || []);
+          accessories.forEach((item) => {
+            const accessoryProductId = String(item.productId || "").trim();
+            const accessoryHandle = normalizeHandle(item.handle);
+
+            if (sourceProductId && accessoryProductId && sourceProductId === accessoryProductId) {
+              return;
+            }
+            if (sourceHandle && accessoryHandle && sourceHandle === accessoryHandle) {
+              return;
+            }
+
+            if (accessoryProductId && !seenProducts.has(accessoryProductId)) {
+              seenProducts.add(accessoryProductId);
+              productIds.push(accessoryProductId);
+            }
+            if (accessoryHandle && !seenHandles.has(accessoryHandle)) {
+              seenHandles.add(accessoryHandle);
+              handles.push(accessoryHandle);
+            }
+
+            const linkKey = `${accessoryProductId}|${accessoryHandle}|${sourceHandle}`;
+            if (!accessoryProductId && !accessoryHandle) return;
+            if (!sourceHandle) return;
+            if (seenLinks.has(linkKey)) return;
+
+            seenLinks.add(linkKey);
+            links.push({
+              productId: accessoryProductId,
+              handle: accessoryHandle,
+              sourceHandle,
+            });
+          });
+        });
       });
     });
 
     return {
       productIds: productIds.slice(0, 80),
       handles: handles.slice(0, 80),
+      links: links.slice(0, 80),
     };
   }
 

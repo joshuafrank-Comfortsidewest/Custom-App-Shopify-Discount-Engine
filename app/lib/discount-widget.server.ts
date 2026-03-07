@@ -31,6 +31,25 @@ type RecommenderConfig = {
   nearThresholdPercent: number;
 };
 
+export type AccessoryContextLink = {
+  productId: string;
+  handle: string;
+  sourceHandle: string;
+};
+
+export type WidgetRecommendationVariant = {
+  variantId: string;
+  variantTitle: string;
+  price: number;
+  estimatedNetPrice: number;
+  estimatedSavings: number;
+  projectedTierCode: string | null;
+  projectedPercent: number;
+  unlocksNextTier: boolean;
+  effectivelyFree: boolean;
+  benefitLabel: string;
+};
+
 type TierProgress = {
   currentTier: Tier | null;
   nextTier: Tier | null;
@@ -57,6 +76,9 @@ export type WidgetRecommendation = {
   imageUrl: string | null;
   productUrl: string | null;
   benefitLabel: string;
+  recommendationType: string;
+  recommendedFor: string[];
+  variants: WidgetRecommendationVariant[];
 };
 
 type PricingPreview = {
@@ -290,6 +312,7 @@ export async function fetchRecommendedProducts({
   excludedVariantIds,
   preferredAccessoryProductIds,
   preferredAccessoryHandles,
+  accessoryContext,
   currency,
   config,
 }: {
@@ -304,6 +327,7 @@ export async function fetchRecommendedProducts({
   excludedVariantIds: Set<string>;
   preferredAccessoryProductIds: Set<string>;
   preferredAccessoryHandles: Set<string>;
+  accessoryContext: AccessoryContextLink[];
   currency: string;
   config: RecommenderConfig;
 }): Promise<WidgetRecommendation[]> {
@@ -322,9 +346,13 @@ export async function fetchRecommendedProducts({
       handles: preferredAccessoryHandles,
     });
 
+    const hasAccessoryHints =
+      preferredAccessoryProductIds.size > 0 ||
+      preferredAccessoryHandles.size > 0 ||
+      accessoryContext.length > 0;
     const poolTargetSize = Math.max(config.maxRecommendations * 10, 40);
     const fallbackProducts =
-      preferredProducts.length >= poolTargetSize
+      hasAccessoryHints || preferredProducts.length >= poolTargetSize
         ? []
         : await fetchFallbackProducts(admin, poolTargetSize - preferredProducts.length);
 
@@ -335,6 +363,7 @@ export async function fetchRecommendedProducts({
     const preferredHandleSet = new Set(
       Array.from(preferredAccessoryHandles).map((handle) => normalizeHandle(handle)),
     );
+    const sourceMap = buildAccessorySourceMaps(accessoryContext);
 
     const currentPercent = Number.isFinite(currentDiscountPercent)
       ? clamp(Number(currentDiscountPercent), 0, 100)
@@ -354,15 +383,26 @@ export async function fetchRecommendedProducts({
         continue;
       }
 
+      const relatedCartItems = getRelatedCartItemsForProduct({
+        productId: productNumericId,
+        handle: product.handle,
+        sourceMap,
+      });
       const isPreferredProduct =
         Boolean(productNumericId && preferredProductIdSet.has(productNumericId)) ||
-        preferredHandleSet.has(normalizeHandle(product.handle));
+        preferredHandleSet.has(normalizeHandle(product.handle)) ||
+        relatedCartItems.length > 0;
 
       const maxVariantPrice = roundMoney(
         isPreferredProduct ? basePriceCap * 2.2 : basePriceCap,
       );
 
-      let bestForProduct: RecommendationCandidate | null = null;
+      const variantCandidates: Array<{
+        score: number;
+        variantId: string;
+        variantTitle: string;
+        option: WidgetRecommendationVariant;
+      }> = [];
 
       for (const variant of product.variants.nodes) {
         if (!variant.availableForSale) continue;
@@ -397,54 +437,89 @@ export async function fetchRecommendedProducts({
           variantPrice: roundedVariantPrice,
           preview,
           isPreferredProduct,
+          relatedCartMatchCount: relatedCartItems.length,
         });
 
         if (score <= 0) continue;
 
-        const recommendation: WidgetRecommendation = {
-          productId: productNumericId ?? product.id,
+        variantCandidates.push({
+          score,
           variantId: variantNumericId ?? variant.id,
-          title: product.title,
           variantTitle: variant.title,
-          price: roundedVariantPrice,
-          compareAtPrice: roundedVariantPrice,
-          estimatedNetPrice: preview.estimatedNetPrice,
-          estimatedSavings: preview.estimatedSavings,
-          projectedTierCode: preview.projectedTier?.code ?? null,
-          projectedPercent: preview.projectedPercent,
-          unlocksNextTier: preview.unlocksNextTier,
-          effectivelyFree: preview.effectivelyFree,
+          option: {
+            variantId: variantNumericId ?? variant.id,
+            variantTitle: variant.title,
+            price: roundedVariantPrice,
+            estimatedNetPrice: preview.estimatedNetPrice,
+            estimatedSavings: preview.estimatedSavings,
+            projectedTierCode: preview.projectedTier?.code ?? null,
+            projectedPercent: preview.projectedPercent,
+            unlocksNextTier: preview.unlocksNextTier,
+            effectivelyFree: preview.effectivelyFree,
+            benefitLabel: buildBenefitLabel({
+              nextTier,
+              preview,
+              amountRemaining,
+              currency,
+            }),
+          },
+        });
+      }
+
+      if (variantCandidates.length === 0) {
+        continue;
+      }
+
+      variantCandidates.sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return a.option.estimatedNetPrice - b.option.estimatedNetPrice;
+      });
+
+      const variants = variantCandidates.slice(0, 4).map((candidate) => candidate.option);
+      const best = variantCandidates[0];
+      const recommendationType = classifyRecommendationType(product.title, product.handle);
+
+      const recommendation: WidgetRecommendation = {
+          productId: productNumericId ?? product.id,
+          variantId: best.variantId,
+          title: product.title,
+          variantTitle: best.variantTitle,
+          price: best.option.price,
+          compareAtPrice: best.option.price,
+          estimatedNetPrice: best.option.estimatedNetPrice,
+          estimatedSavings: best.option.estimatedSavings,
+          projectedTierCode: best.option.projectedTierCode,
+          projectedPercent: best.option.projectedPercent,
+          unlocksNextTier: best.option.unlocksNextTier,
+          effectivelyFree: best.option.effectivelyFree,
           source: isPreferredProduct ? "cart_accessory_match" : "fallback",
           imageUrl: product.featuredImage?.url ?? null,
           productUrl: product.onlineStoreUrl,
-          benefitLabel: buildBenefitLabel({
-            nextTier,
-            preview,
-            amountRemaining,
-            currency,
-          }),
+          benefitLabel: best.option.benefitLabel,
+          recommendationType,
+          recommendedFor: relatedCartItems,
+          variants,
         };
 
-        if (!bestForProduct || score > bestForProduct.score) {
-          bestForProduct = { score, recommendation };
-        }
-      }
+      const diversityBoost =
+        recommendationType === "Line set"
+          ? 0
+          : recommendationType === "Other"
+            ? 6
+            : 18;
+      const bestForProduct: RecommendationCandidate = {
+        score: roundMoney(best.score + diversityBoost),
+        recommendation,
+      };
 
       if (bestForProduct) {
         candidates.push(bestForProduct);
       }
     }
 
-    return candidates
-      .sort((a, b) => {
-        if (b.score !== a.score) return b.score - a.score;
-        if (a.recommendation.estimatedNetPrice !== b.recommendation.estimatedNetPrice) {
-          return a.recommendation.estimatedNetPrice - b.recommendation.estimatedNetPrice;
-        }
-        return a.recommendation.title.localeCompare(b.recommendation.title);
-      })
-      .slice(0, config.maxRecommendations)
-      .map((candidate) => candidate.recommendation);
+    const selected = selectDiverseRecommendations(candidates, config.maxRecommendations);
+
+    return selected.map((candidate) => candidate.recommendation);
   } catch {
     return [];
   }
@@ -466,6 +541,143 @@ export function parseBoolean(value: string | null, defaultValue = false): boolea
 export function parseNumber(value: string | null, defaultValue: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : defaultValue;
+}
+
+function buildAccessorySourceMaps(accessoryContext: AccessoryContextLink[]): {
+  byProductId: Map<string, Set<string>>;
+  byHandle: Map<string, Set<string>>;
+} {
+  const byProductId = new Map<string, Set<string>>();
+  const byHandle = new Map<string, Set<string>>();
+
+  for (const item of accessoryContext) {
+    const productId = String(item.productId || "").trim();
+    const handle = normalizeHandle(item.handle);
+    const sourceHandle = normalizeHandle(item.sourceHandle);
+    if (!sourceHandle) continue;
+
+    const sourceLabel = humanizeHandle(sourceHandle);
+
+    if (productId) {
+      if (!byProductId.has(productId)) byProductId.set(productId, new Set<string>());
+      byProductId.get(productId)!.add(sourceLabel);
+    }
+
+    if (handle) {
+      if (!byHandle.has(handle)) byHandle.set(handle, new Set<string>());
+      byHandle.get(handle)!.add(sourceLabel);
+    }
+  }
+
+  return { byProductId, byHandle };
+}
+
+function getRelatedCartItemsForProduct({
+  productId,
+  handle,
+  sourceMap,
+}: {
+  productId: string | null;
+  handle: string;
+  sourceMap: {
+    byProductId: Map<string, Set<string>>;
+    byHandle: Map<string, Set<string>>;
+  };
+}): string[] {
+  const labels = new Set<string>();
+  const normalizedHandle = normalizeHandle(handle);
+
+  if (productId && sourceMap.byProductId.has(productId)) {
+    for (const label of sourceMap.byProductId.get(productId) ?? []) {
+      labels.add(label);
+    }
+  }
+
+  if (normalizedHandle && sourceMap.byHandle.has(normalizedHandle)) {
+    for (const label of sourceMap.byHandle.get(normalizedHandle) ?? []) {
+      labels.add(label);
+    }
+  }
+
+  return Array.from(labels).slice(0, 3);
+}
+
+function selectDiverseRecommendations(
+  candidates: RecommendationCandidate[],
+  maxRecommendations: number,
+): RecommendationCandidate[] {
+  const ranked = [...candidates].sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    if (a.recommendation.estimatedNetPrice !== b.recommendation.estimatedNetPrice) {
+      return a.recommendation.estimatedNetPrice - b.recommendation.estimatedNetPrice;
+    }
+    return a.recommendation.title.localeCompare(b.recommendation.title);
+  });
+
+  if (ranked.length <= maxRecommendations) return ranked;
+
+  const selected: RecommendationCandidate[] = [];
+  const usedTypes = new Set<string>();
+
+  for (const candidate of ranked) {
+    if (selected.length >= maxRecommendations) break;
+    const type = candidate.recommendation.recommendationType || "Other";
+    if (usedTypes.has(type)) continue;
+    selected.push(candidate);
+    usedTypes.add(type);
+  }
+
+  for (const candidate of ranked) {
+    if (selected.length >= maxRecommendations) break;
+    if (selected.includes(candidate)) continue;
+    selected.push(candidate);
+  }
+
+  return selected;
+}
+
+function classifyRecommendationType(title: string, handle: string): string {
+  const haystack = `${String(title || "")} ${String(handle || "")}`.toLowerCase();
+
+  if (/(line\s*set|pre[-\s]?flared|flare|copper|line[\s-]?hide)/.test(haystack)) {
+    return "Line set";
+  }
+  if (/(mount|bracket|stand|pad|wall mount)/.test(haystack)) {
+    return "Mounting";
+  }
+  if (/(disconnect|surge|wire|whip|breaker|electrical|voltage)/.test(haystack)) {
+    return "Electrical";
+  }
+  if (/(drain|pump|condensate|trap|float switch)/.test(haystack)) {
+    return "Drain";
+  }
+  if (/(cover|guard|protector|shield|snow|hail)/.test(haystack)) {
+    return "Protection";
+  }
+  if (/(remote|thermostat|controller|wifi|module|sensor)/.test(haystack)) {
+    return "Control";
+  }
+  if (/(filter|clean|coil|maintenance|kit|seal|insulation)/.test(haystack)) {
+    return "Maintenance";
+  }
+
+  return "Other";
+}
+
+function humanizeHandle(handle: string): string {
+  const value = normalizeHandle(handle);
+  if (!value) return "current cart item";
+
+  return value
+    .split("-")
+    .filter(Boolean)
+    .slice(0, 8)
+    .map((segment) =>
+      segment.length <= 3
+        ? segment.toUpperCase()
+        : `${segment.charAt(0).toUpperCase()}${segment.slice(1)}`,
+    )
+    .join(" ");
 }
 
 async function fetchPreferredProducts({
@@ -691,6 +903,7 @@ function scoreRecommendation({
   variantPrice,
   preview,
   isPreferredProduct,
+  relatedCartMatchCount,
 }: {
   amountRemaining: number;
   nextTier: Tier | null;
@@ -698,11 +911,15 @@ function scoreRecommendation({
   variantPrice: number;
   preview: PricingPreview;
   isPreferredProduct: boolean;
+  relatedCartMatchCount: number;
 }): number {
   let score = 0;
 
   if (isPreferredProduct) {
     score += 320;
+  }
+  if (relatedCartMatchCount > 0) {
+    score += 140 + Math.min(relatedCartMatchCount, 3) * 45;
   }
 
   if (nextTier && amountRemaining > 0) {

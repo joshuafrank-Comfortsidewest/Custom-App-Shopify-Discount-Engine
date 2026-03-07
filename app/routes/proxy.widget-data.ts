@@ -1,6 +1,7 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import {
+  type AccessoryContextLink,
   fetchEngineConfiguredTiers,
   fetchRecommendedProducts,
   formatMoney,
@@ -85,6 +86,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       .map((value) => value.trim())
       .filter(Boolean),
   );
+  const cartVariantIds = new Set(
+    (url.searchParams.get("cartVariantIds") || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
+  );
+  for (const line of cartLines) {
+    if (line.variantId) cartVariantIds.add(line.variantId);
+  }
+  for (const id of cartVariantIds) {
+    excludedVariantIds.add(id);
+  }
   const preferredAccessoryProductIds = new Set(
     (url.searchParams.get("preferredAccessoryProductIds") || "")
       .split(",")
@@ -97,6 +110,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       .map((value) => value.trim().toLowerCase())
       .filter(Boolean),
   );
+  const accessoryContext = parseAccessoryContext(url.searchParams.get("accessoryContext"));
 
   const progress = getTierProgress(
     subtotal,
@@ -125,6 +139,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           excludedVariantIds,
           preferredAccessoryProductIds,
           preferredAccessoryHandles,
+          accessoryContext,
           currency,
           config: { maxRecommendations, nearThresholdPercent },
         })
@@ -198,6 +213,39 @@ function parseCartLines(raw: string | null): CartLinePayload[] {
         };
       })
       .filter((line): line is CartLinePayload => line !== null);
+  } catch {
+    return [];
+  }
+}
+
+function parseAccessoryContext(raw: string | null): AccessoryContextLink[] {
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .map((entry) => {
+        const productId = String(entry?.productId || entry?.p || "").trim();
+        const handle = String(entry?.handle || entry?.h || "")
+          .trim()
+          .toLowerCase();
+        const sourceHandle = String(entry?.sourceHandle || entry?.s || "")
+          .trim()
+          .toLowerCase();
+
+        if (!productId && !handle) return null;
+        if (!sourceHandle) return null;
+
+        return {
+          productId,
+          handle,
+          sourceHandle,
+        };
+      })
+      .filter((entry): entry is AccessoryContextLink => entry !== null)
+      .slice(0, 80);
   } catch {
     return [];
   }
