@@ -1162,7 +1162,7 @@ async function fetchPreferredProducts({
   handles: Set<string>;
 }): Promise<ProductNode[]> {
   const byHandles = await fetchProductsByHandles(admin, handles);
-  if (byHandles.length > 0) {
+  if (handles.size > 0) {
     return dedupeProducts(byHandles);
   }
 
@@ -1234,60 +1234,57 @@ async function fetchProductsByHandles(
 
   if (!admin || sanitizedHandles.length === 0) return [];
 
-  const allowedHandleSet = new Set(
-    sanitizedHandles.map((handle) => normalizeHandle(handle)).filter(Boolean),
-  );
-  const query = sanitizedHandles
-    .map((handle) => `handle:'${escapeShopifySearchValue(handle)}'`)
-    .join(" OR ");
-  const response = await admin.graphql(
-    `#graphql
-      query DiscountProgressProductsByHandles($first: Int!, $query: String!) {
-        products(first: $first, query: $query) {
-          nodes {
-            id
-            title
-            handle
-            onlineStoreUrl
-            featuredImage {
-              url
-              altText
-            }
-            variants(first: 6) {
+  const results = await Promise.all(
+    sanitizedHandles.map(async (handle) => {
+      const query = `handle:'${escapeShopifySearchValue(handle)}'`;
+      const response = await admin.graphql(
+        `#graphql
+          query DiscountProgressProductByHandle($query: String!) {
+            products(first: 4, query: $query) {
               nodes {
                 id
                 title
-                price
-                availableForSale
-                inventoryQuantity
+                handle
+                onlineStoreUrl
+                featuredImage {
+                  url
+                  altText
+                }
+                variants(first: 6) {
+                  nodes {
+                    id
+                    title
+                    price
+                    availableForSale
+                    inventoryQuantity
+                  }
+                }
               }
             }
           }
-        }
-      }
-    `,
-    {
-      variables: {
-        first: Math.max(20, sanitizedHandles.length),
-        query,
-      },
-    },
-  );
+        `,
+        { variables: { query } },
+      );
 
-  if (!response.ok) return [];
+      if (!response.ok) return null;
 
-  const json = (await response.json()) as {
-    data?: {
-      products?: {
-        nodes?: ProductNode[];
+      const json = (await response.json()) as {
+        data?: {
+          products?: {
+            nodes?: ProductNode[];
+          };
+        };
       };
-    };
-  };
 
-  return (json.data?.products?.nodes ?? []).filter(
-    (node) =>
-      isProductNode(node) && allowedHandleSet.has(normalizeHandle(node.handle)),
+      const nodes = json.data?.products?.nodes ?? [];
+      const exact = nodes.find(
+        (node) => isProductNode(node) && normalizeHandle(node.handle) === handle,
+      );
+      return exact ?? null;
+    }),
   );
+
+  return results.filter((node): node is ProductNode => isProductNode(node));
 }
 
 async function fetchFallbackProducts(

@@ -8,6 +8,8 @@
     maximumFractionDigits: 2,
   });
   const DEFAULT_TECINFO_URL = "/assets/tecinfo.json";
+  const TECHDATA_SOURCE_SELECTOR =
+    "#sms-techdata-source .tech-data-root, #sms-techdata-source.tech-data-root, #sms-acc-source .acc-root";
   const ACCESSORY_HINT_CACHE = {
     tecinfoUrl: null,
     tecinfoMap: null,
@@ -874,9 +876,7 @@
       return ACCESSORY_HINT_CACHE.tecinfoUrl;
     }
 
-    const pageSource = document.querySelector(
-      "#sms-techdata-source.tech-data-root, #sms-techdata-source, .tech-data-root[data-techdata-json]",
-    );
+    const pageSource = document.querySelector(TECHDATA_SOURCE_SELECTOR);
     const pageTecinfoUrl = pageSource && pageSource.getAttribute("data-techdata-json");
     const normalizedPageUrl = normalizeTecinfoUrl(pageTecinfoUrl);
     if (normalizedPageUrl) {
@@ -927,9 +927,7 @@
           const html = await response.text();
           const parser = new DOMParser();
           const doc = parser.parseFromString(html, "text/html");
-          const source = doc.querySelector(
-            "#sms-techdata-source.tech-data-root, #sms-techdata-source, .tech-data-root[data-techdata-json]",
-          );
+          const source = doc.querySelector(TECHDATA_SOURCE_SELECTOR);
           if (!source) return null;
 
           const parsed = {
