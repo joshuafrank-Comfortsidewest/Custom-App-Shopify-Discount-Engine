@@ -53,6 +53,7 @@ export type WidgetRecommendationVariant = {
   unlocksNextTier: boolean;
   effectivelyFree: boolean;
   benefitLabel: string;
+  pricingSource: "exact" | "estimated";
 };
 
 type TierProgress = {
@@ -84,6 +85,7 @@ export type WidgetRecommendation = {
   recommendationType: string;
   recommendedFor: string[];
   variants: WidgetRecommendationVariant[];
+  pricingSource: "exact" | "estimated";
 };
 
 type PricingPreview = {
@@ -104,6 +106,7 @@ type RecommendationCandidate = {
 const DEFAULT_TIERS = "100:5,250:10,400:13,600:15";
 const SHADOW_CART_CACHE_TTL_MS = 90 * 1000;
 const SHADOW_CART_MAX_PREVIEW_ITEMS = 2;
+const SHADOW_CART_MAX_PREVIEW_VARIANTS = 4;
 const SHADOW_CART_CACHE = new Map<string, { expiresAt: number; subtotal: number }>();
 
 type EngineConfigTierPayload = {
@@ -470,6 +473,7 @@ export async function fetchRecommendedProducts({
               amountRemaining,
               currency,
             }),
+            pricingSource: "estimated",
           },
         });
       }
@@ -507,6 +511,7 @@ export async function fetchRecommendedProducts({
           recommendationType,
           recommendedFor: relatedCartItems,
           variants,
+          pricingSource: best.option.pricingSource,
         };
 
       const diversityBoost =
@@ -598,46 +603,58 @@ export async function applyShadowCartExactPricing({
 
   const enriched = recommendations.map((item) => ({
     ...item,
+    pricingSource: item.pricingSource ?? "estimated",
     variants: Array.isArray(item.variants) ? [...item.variants] : [],
   }));
 
   for (let i = 0; i < Math.min(enriched.length, SHADOW_CART_MAX_PREVIEW_ITEMS); i += 1) {
     const recommendation = enriched[i];
-    const variantGid = toVariantGid(recommendation.variantId);
-    if (!variantGid) continue;
+    const variantsToPreview = recommendation.variants.slice(0, SHADOW_CART_MAX_PREVIEW_VARIANTS);
+    for (const variant of variantsToPreview) {
+      const variantGid = toVariantGid(variant.variantId);
+      if (!variantGid) continue;
 
-    const scenarioLines = [...cartSeed, { variantGid, quantity: 1 }];
-    const scenarioSubtotal = await getShadowCartSubtotal({
-      shop: normalizedShop,
-      apiVersion: storefrontApiVersion,
-      storefrontToken,
-      lines: scenarioLines,
-      cacheKey: `${normalizedShop}|${cartHash}|${variantGid}|1`,
-    });
-    if (!Number.isFinite(scenarioSubtotal) || scenarioSubtotal < baseSubtotal) {
-      continue;
+      const scenarioLines = [...cartSeed, { variantGid, quantity: 1 }];
+      const scenarioSubtotal = await getShadowCartSubtotal({
+        shop: normalizedShop,
+        apiVersion: storefrontApiVersion,
+        storefrontToken,
+        lines: scenarioLines,
+        cacheKey: `${normalizedShop}|${cartHash}|${variantGid}|1`,
+      });
+      if (!Number.isFinite(scenarioSubtotal) || scenarioSubtotal < baseSubtotal) {
+        continue;
+      }
+
+      const exactNet = roundMoney(Math.max(0, scenarioSubtotal - baseSubtotal));
+      const exactSavings = roundMoney(Math.max(0, variant.price - exactNet));
+      const exactFree = exactNet <= 0.01;
+      const exactBenefit = `Exact preview: ${formatMoney(exactNet, currency)} with current cart`;
+      const variantIndex = recommendation.variants.findIndex(
+        (entry) => String(entry.variantId) === String(variant.variantId),
+      );
+      if (variantIndex >= 0) {
+        recommendation.variants[variantIndex] = {
+          ...recommendation.variants[variantIndex],
+          estimatedNetPrice: exactNet,
+          estimatedSavings: exactSavings,
+          effectivelyFree: exactFree,
+          benefitLabel: exactBenefit,
+          pricingSource: "exact",
+        };
+      }
     }
 
-    const exactNet = roundMoney(Math.max(0, scenarioSubtotal - baseSubtotal));
-    const exactSavings = roundMoney(Math.max(0, recommendation.price - exactNet));
-    const exactFree = exactNet <= 0.01;
-    recommendation.estimatedNetPrice = exactNet;
-    recommendation.estimatedSavings = exactSavings;
-    recommendation.effectivelyFree = exactFree;
-    recommendation.benefitLabel = `Exact preview: ${formatMoney(exactNet, currency)} with current cart`;
-
-    const variantIndex = recommendation.variants.findIndex(
+    const selectedVariant = recommendation.variants.find(
       (variant) => String(variant.variantId) === String(recommendation.variantId),
     );
-    if (variantIndex >= 0) {
-      recommendation.variants[variantIndex] = {
-        ...recommendation.variants[variantIndex],
-        estimatedNetPrice: exactNet,
-        estimatedSavings: exactSavings,
-        effectivelyFree: exactFree,
-        benefitLabel: recommendation.benefitLabel,
-      };
-    }
+    if (!selectedVariant) continue;
+
+    recommendation.estimatedNetPrice = selectedVariant.estimatedNetPrice;
+    recommendation.estimatedSavings = selectedVariant.estimatedSavings;
+    recommendation.effectivelyFree = selectedVariant.effectivelyFree;
+    recommendation.benefitLabel = selectedVariant.benefitLabel;
+    recommendation.pricingSource = selectedVariant.pricingSource;
   }
 
   return enriched;

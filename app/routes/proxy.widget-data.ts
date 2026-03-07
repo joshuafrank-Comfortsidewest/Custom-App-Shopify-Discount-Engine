@@ -156,6 +156,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     })),
     recommendations,
   });
+  const exactPreviewCount = recommendations.filter(
+    (item) => item.pricingSource === "exact",
+  ).length;
 
   const primaryMessage = useCurrentDiscountOverride
     ? progress.nextTier
@@ -176,7 +179,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         ? xyzHintMessage
         : null;
   const pricingDisclaimer =
-    "Top picks use exact preview when available. Final discount is always determined at cart/checkout.";
+    exactPreviewCount > 0
+      ? `Exact preview on ${exactPreviewCount} pick${exactPreviewCount > 1 ? "s" : ""}. Final discount is determined at cart/checkout.`
+      : "Estimated preview only. Final discount is determined at cart/checkout.";
 
   return Response.json({
     subtotal,

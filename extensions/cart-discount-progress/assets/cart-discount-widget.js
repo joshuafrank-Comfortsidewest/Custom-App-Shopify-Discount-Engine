@@ -139,7 +139,8 @@
                   const selectedVariant =
                     variants.find((entry) => String(entry.variantId) === String(item.variantId)) ||
                     variants[0];
-                  const hasSavings = Number(selectedVariant.estimatedSavings || 0) > 0;
+                  const isExact = String(selectedVariant.pricingSource || item.pricingSource || "estimated") === "exact";
+                  const hasSavings = isExact && Number(selectedVariant.estimatedSavings || 0) > 0;
                   const recommendedForText = getRecommendedForText(item.recommendedFor);
 
                   return `
@@ -159,6 +160,11 @@
                           : `<span class="cdp-reco-title">${escapeHtml(item.title)}</span>`
                       }
                       <p class="cdp-reco-meta" data-cdp-benefit>${escapeHtml(selectedVariant.benefitLabel || item.benefitLabel || "")}</p>
+                      ${
+                        isExact
+                          ? `<p class="cdp-reco-accuracy cdp-reco-accuracy--exact">Exact preview</p>`
+                          : `<p class="cdp-reco-accuracy">Final discount shown after add to cart</p>`
+                      }
                       ${
                         recommendedForText
                           ? `<p class="cdp-reco-for">Recommended for ${escapeHtml(recommendedForText)}</p>`
@@ -181,6 +187,7 @@
                                         data-savings="${Number(variant.estimatedSavings || 0)}"
                                         data-benefit="${escapeAttr(String(variant.benefitLabel || ""))}"
                                         data-free="${variant.effectivelyFree ? "1" : "0"}"
+                                        data-source="${escapeAttr(String(variant.pricingSource || "estimated"))}"
                                       >
                                         ${escapeHtml(getVariantOptionLabel(variant))}
                                       </option>
@@ -195,7 +202,7 @@
                     </div>
                     <div class="cdp-reco-actions">
                       <span class="cdp-price" data-cdp-net>
-                        Est. ${formatMoney(selectedVariant.estimatedNetPrice ?? selectedVariant.price)}
+                        ${isExact ? "Exact" : "Est."} ${formatMoney(selectedVariant.estimatedNetPrice ?? selectedVariant.price)}
                       </span>
                       ${
                         hasSavings
@@ -368,6 +375,7 @@
         estimatedSavings: Number(item.estimatedSavings || 0),
         effectivelyFree: Boolean(item.effectivelyFree),
         benefitLabel: item.benefitLabel || "",
+        pricingSource: item.pricingSource || "estimated",
       },
     ];
   }
@@ -406,15 +414,25 @@
     const estimatedSavings = Number(selectedOption.getAttribute("data-savings") || 0);
     const benefitLabel = String(selectedOption.getAttribute("data-benefit") || "");
     const effectivelyFree = selectedOption.getAttribute("data-free") === "1";
+    const pricingSource = String(selectedOption.getAttribute("data-source") || "estimated");
+    const hasExact = pricingSource === "exact";
+    const hasSavings = hasExact && estimatedSavings > 0;
 
     if (button) button.setAttribute("data-variant-id", variantId);
     if (benefit) benefit.textContent = benefitLabel;
+    const accuracy = row.querySelector(".cdp-reco-accuracy");
+    if (accuracy) {
+      accuracy.textContent = hasExact
+        ? "Exact preview"
+        : "Final discount shown after add to cart";
+      accuracy.classList.toggle("cdp-reco-accuracy--exact", hasExact);
+    }
     if (net) {
-      net.textContent = `Est. ${formatMoney(estimatedNet)}`;
+      net.textContent = `${hasExact ? "Exact" : "Est."} ${formatMoney(estimatedNet)}`;
       net.classList.toggle("cdp-price-free", effectivelyFree && estimatedNet <= 0.01);
     }
     if (compare) {
-      if (estimatedSavings > 0) {
+      if (hasSavings) {
         compare.hidden = false;
         compare.textContent = formatMoney(price);
       } else {
@@ -423,9 +441,9 @@
       }
     }
     if (save) {
-      if (estimatedSavings > 0) {
+      if (hasSavings) {
         save.hidden = false;
-        save.textContent = `Est. save ~${formatMoney(estimatedSavings)}`;
+        save.textContent = `${hasExact ? "Save ~" : "Est. save ~"}${formatMoney(estimatedSavings)}`;
       } else {
         save.hidden = true;
         save.textContent = "";
