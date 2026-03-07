@@ -12,6 +12,20 @@
     tecinfoMap: null,
     tecinfoLoading: null,
   };
+  const RECOMMENDATION_TYPE_ORDER = [
+    "Line set covers",
+    "Line Sets",
+    "Wall Brackets / Condenser Pad",
+    "Heat Kit",
+    "Cleaning Kit",
+    "Couplers",
+    "Thermostat",
+    "Conduit Cables",
+    "Disconnect Box",
+    "Rubber Feet Mounting Set",
+    "Ground Stands",
+    "Accessories",
+  ];
 
   class CartDiscountWidget {
     constructor(root) {
@@ -166,7 +180,7 @@
             .map((item) => normalizeRecommendationType(item && item.recommendationType))
             .filter(Boolean),
         ),
-      );
+      ).sort((a, b) => recommendationTypeOrderIndex(a) - recommendationTypeOrderIndex(b));
       if (!this.typeFilterPinned || !recommendationTypes.includes(this.selectedRecommendationType)) {
         this.selectedRecommendationType = recommendationTypes[0] || "";
         this.typeFilterPinned = false;
@@ -569,6 +583,12 @@
   function normalizeRecommendationType(value) {
     const normalized = String(value || "").trim();
     return normalized || "Accessories";
+  }
+
+  function recommendationTypeOrderIndex(type) {
+    const normalized = normalizeRecommendationType(type);
+    const idx = RECOMMENDATION_TYPE_ORDER.indexOf(normalized);
+    return idx === -1 ? RECOMMENDATION_TYPE_ORDER.length + 1 : idx;
   }
 
   function syncRecommendationVariantState(select) {

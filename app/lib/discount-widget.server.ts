@@ -109,6 +109,95 @@ const SHADOW_CART_CACHE_TTL_MS = 90 * 1000;
 const SHADOW_CART_MAX_PREVIEW_ITEMS = 10;
 const SHADOW_CART_MAX_PREVIEW_VARIANTS = 4;
 const SHADOW_CART_CACHE = new Map<string, { expiresAt: number; subtotal: number }>();
+const RECOMMENDATION_TYPE_ORDER = [
+  "Line set covers",
+  "Line Sets",
+  "Wall Brackets / Condenser Pad",
+  "Heat Kit",
+  "Cleaning Kit",
+  "Couplers",
+  "Thermostat",
+  "Conduit Cables",
+  "Disconnect Box",
+  "Rubber Feet Mounting Set",
+  "Ground Stands",
+  "Accessories",
+] as const;
+const RECOMMENDATION_TYPE_PRODUCT_IDS: Record<string, Set<string>> = {
+  "Line set covers": new Set([
+    "7420475277427",
+    "7784329478259",
+    "8004649517171",
+    "8004667080819",
+    "8053617295475",
+  ]),
+  "Line Sets": new Set([
+    "8056140103795",
+    "7347732283507",
+    "8014110228595",
+    "8014232748147",
+    "8014250672243",
+    "8014258929779",
+    "8014268104819",
+    "8052349042803",
+    "8048835068019",
+    "8014321451123",
+    "7871035375731",
+    "7871312920691",
+    "7347983646835",
+    "7871070437491",
+    "7871408996467",
+    "7346828476531",
+    "7871160057971",
+    "7871417024627",
+    "7346841485427",
+    "7347980533875",
+    "7871217598579",
+    "8037632344179",
+    "8036342694003",
+    "8036336730227",
+    "8036351639667",
+    "8036331913331",
+    "8055997857907",
+    "8056020729971",
+  ]),
+  "Wall Brackets / Condenser Pad": new Set([
+    "8111079882867",
+    "7855248081011",
+    "8004737138803",
+    "8004764401779",
+    "7850596696179",
+    "8004698243187",
+    "7420483698803",
+  ]),
+  "Heat Kit": new Set([
+    "7932186591347",
+    "7932195995763",
+    "7932199600243",
+    "7932201205875",
+    "7932202352755",
+    "7992329470067",
+    "7992329994355",
+    "7992330780787",
+    "7992328749171",
+    "7842623127667",
+    "7842622210163",
+    "7812784914547",
+    "7842621751411",
+    "8014096859251",
+    "8014095286387",
+    "8014094467187",
+    "8014092697715",
+    "8014080573555",
+  ]),
+  "Cleaning Kit": new Set(["7855129690227"]),
+  Couplers: new Set(["7855235006579", "7855238676595"]),
+  Thermostat: new Set(["7800311185523", "8056167891059", "8056169431155", "8062486544499"]),
+  "Conduit Cables": new Set(["7850574938227"]),
+  "Disconnect Box": new Set(["7850581426291", "8004678910067", "7850578018419"]),
+  "Rubber Feet Mounting Set": new Set(["8004578836595"]),
+  "Ground Stands": new Set(["8004777836659", "7784261976179", "7784222031987"]),
+};
 
 type EngineConfigTierPayload = {
   toggles?: {
@@ -402,7 +491,11 @@ export async function fetchRecommendedProducts({
         handle: product.handle,
         sourceMap,
       });
-      const recommendationType = classifyRecommendationType(product.title, product.handle);
+      const recommendationType = classifyRecommendationType(
+        product.title,
+        product.handle,
+        productNumericId,
+      );
       const typeNeedsBtuMatching = isBtuSensitiveType(recommendationType);
       const isPreferredProduct =
         Boolean(productNumericId && preferredProductIdSet.has(productNumericId)) ||
@@ -797,7 +890,19 @@ function selectDiverseRecommendations(
   return selected;
 }
 
-function classifyRecommendationType(title: string, handle: string): string {
+function classifyRecommendationType(
+  title: string,
+  handle: string,
+  productId: string | null,
+): string {
+  const pid = String(productId || "").trim();
+  if (pid) {
+    for (const type of RECOMMENDATION_TYPE_ORDER) {
+      const set = RECOMMENDATION_TYPE_PRODUCT_IDS[type];
+      if (set && set.has(pid)) return type;
+    }
+  }
+
   const haystack = `${String(title || "")} ${String(handle || "")}`.toLowerCase();
 
   if (/(conduit|cable|wire\s*kit|control\s*wire|signal\s*wire)/.test(haystack)) {
