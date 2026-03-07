@@ -19,6 +19,8 @@
       this.settings = this.readSettings(root.dataset);
       this.latestResponse = null;
       this.expandedRecommendations = false;
+      this.selectedRecommendationType = "";
+      this.typeFilterPinned = false;
     }
 
     readSettings(dataset) {
@@ -106,14 +108,36 @@
     render(data) {
       const recommendations = Array.isArray(data.recommendations) ? data.recommendations : [];
       const defaultVisibleCount = Math.max(1, Number(this.settings.maxRecommendations || 2));
-      if (!this.expandedRecommendations && recommendations.length <= defaultVisibleCount) {
+      const recommendationTypes = Array.from(
+        new Set(
+          recommendations
+            .map((item) => normalizeRecommendationType(item && item.recommendationType))
+            .filter(Boolean),
+        ),
+      );
+      if (!this.typeFilterPinned || !recommendationTypes.includes(this.selectedRecommendationType)) {
+        this.selectedRecommendationType = recommendationTypes[0] || "";
+        this.typeFilterPinned = false;
+      }
+      const filteredRecommendations =
+        this.selectedRecommendationType && recommendationTypes.includes(this.selectedRecommendationType)
+          ? recommendations.filter(
+              (item) =>
+                normalizeRecommendationType(item && item.recommendationType) ===
+                this.selectedRecommendationType,
+            )
+          : recommendations;
+      if (!this.expandedRecommendations && filteredRecommendations.length <= defaultVisibleCount) {
         this.expandedRecommendations = false;
       }
       const visibleCount = this.expandedRecommendations
-        ? recommendations.length
-        : Math.min(defaultVisibleCount, recommendations.length);
-      const visibleRecommendations = recommendations.slice(0, visibleCount);
-      const remainingRecommendationCount = Math.max(0, recommendations.length - visibleCount);
+        ? filteredRecommendations.length
+        : Math.min(defaultVisibleCount, filteredRecommendations.length);
+      const visibleRecommendations = filteredRecommendations.slice(0, visibleCount);
+      const remainingRecommendationCount = Math.max(
+        0,
+        filteredRecommendations.length - visibleCount,
+      );
       const currentTierText = data.currentTier
         ? `${data.currentTier.code} (${data.currentTier.percent}%)`
         : "None";
@@ -147,6 +171,27 @@
                 <span class="cdp-count">${recommendations.length} pick${recommendations.length > 1 ? "s" : ""}</span>
               </div>
               ${
+                recommendationTypes.length > 1
+                  ? `
+                    <div class="cdp-type-tabs">
+                      ${recommendationTypes
+                        .map(
+                          (type) => `
+                            <button
+                              type="button"
+                              class="cdp-type-tab ${this.selectedRecommendationType === type ? "cdp-type-tab--active" : ""}"
+                              data-cdp-type="${escapeAttr(type)}"
+                            >
+                              ${escapeHtml(type)}
+                            </button>
+                          `,
+                        )
+                        .join("")}
+                    </div>
+                  `
+                  : ""
+              }
+              ${
                 data.labels && data.labels.pricingDisclaimer
                   ? `<p class="cdp-reco-disclaimer">${escapeHtml(String(data.labels.pricingDisclaimer))}</p>`
                   : ""
@@ -163,6 +208,7 @@
                     ? Number(selectedVariant.estimatedNetPrice ?? selectedVariant.price)
                     : Number(selectedVariant.price || 0);
                   const recommendedForText = getRecommendedForText(item.recommendedFor);
+                  const recommendedBtuText = getRecommendedBtuText(item.recommendedForBtu);
 
                   return `
                   <div class="cdp-reco-item">
@@ -189,6 +235,11 @@
                       ${
                         recommendedForText
                           ? `<p class="cdp-reco-for">Recommended for ${escapeHtml(recommendedForText)}</p>`
+                          : ""
+                      }
+                      ${
+                        recommendedBtuText
+                          ? `<p class="cdp-reco-for cdp-reco-for-btu">For your ${escapeHtml(recommendedBtuText)} head</p>`
                           : ""
                       }
                       ${
@@ -244,7 +295,8 @@
               ${
                 remainingRecommendationCount > 0
                   ? `<button type="button" class="cdp-more-btn" data-cdp-more-picks>Show ${Math.min(defaultVisibleCount, remainingRecommendationCount)} more picks</button>`
-                  : this.expandedRecommendations && recommendations.length > defaultVisibleCount
+                  : this.expandedRecommendations &&
+                    filteredRecommendations.length > defaultVisibleCount
                     ? `<button type="button" class="cdp-more-btn cdp-more-btn-less" data-cdp-less-picks>Show fewer picks</button>`
                     : ""
               }
@@ -293,6 +345,17 @@
     }
 
     bindActions() {
+      this.root.querySelectorAll("[data-cdp-type]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const nextType = String(button.getAttribute("data-cdp-type") || "").trim();
+          if (!nextType || nextType === this.selectedRecommendationType) return;
+          this.selectedRecommendationType = nextType;
+          this.typeFilterPinned = true;
+          this.expandedRecommendations = false;
+          if (this.latestResponse) this.render(this.latestResponse);
+        });
+      });
+
       const moreButton = this.root.querySelector("[data-cdp-more-picks]");
       if (moreButton) {
         moreButton.addEventListener("click", () => {
@@ -437,6 +500,25 @@
     return `${clean.slice(0, 2).join(" + ")} +${clean.length - 2} more`;
   }
 
+  function getRecommendedBtuText(items) {
+    if (!Array.isArray(items) || items.length === 0) return "";
+    const clean = items
+      .map((item) => Number(item))
+      .filter((value) => Number.isFinite(value) && value >= 6000 && value <= 60000);
+    if (clean.length === 0) return "";
+    const sorted = Array.from(new Set(clean)).sort((a, b) => a - b);
+    if (sorted.length === 1) return `${sorted[0].toLocaleString()} BTU`;
+    if (sorted.length === 2) {
+      return `${sorted[0].toLocaleString()} BTU + ${sorted[1].toLocaleString()} BTU`;
+    }
+    return `${sorted[0].toLocaleString()} BTU +${sorted.length - 1} more`;
+  }
+
+  function normalizeRecommendationType(value) {
+    const normalized = String(value || "").trim();
+    return normalized || "Accessories";
+  }
+
   function syncRecommendationVariantState(select) {
     const row = select && select.closest ? select.closest(".cdp-reco-item") : null;
     if (!row) return;
@@ -507,6 +589,8 @@
           quantity: Math.max(1, Number(item.quantity || 1)),
           sku: String(item.sku || "").trim(),
           handle: normalizeHandle(item.handle || item.product_handle || ""),
+          title: String(item.product_title || item.title || "").trim(),
+          variantTitle: String(item.variant_title || "").trim(),
         };
       })
       .filter(Boolean);

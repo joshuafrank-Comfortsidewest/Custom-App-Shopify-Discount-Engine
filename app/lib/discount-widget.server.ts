@@ -84,6 +84,7 @@ export type WidgetRecommendation = {
   benefitLabel: string;
   recommendationType: string;
   recommendedFor: string[];
+  recommendedForBtu: number[];
   variants: WidgetRecommendationVariant[];
   pricingSource: "exact" | "estimated";
 };
@@ -324,6 +325,7 @@ export async function fetchRecommendedProducts({
   preferredAccessoryProductIds,
   preferredAccessoryHandles,
   accessoryContext,
+  cartBtuValues,
   currency,
   config,
 }: {
@@ -339,6 +341,7 @@ export async function fetchRecommendedProducts({
   preferredAccessoryProductIds: Set<string>;
   preferredAccessoryHandles: Set<string>;
   accessoryContext: AccessoryContextLink[];
+  cartBtuValues: number[];
   currency: string;
   config: RecommenderConfig;
 }): Promise<WidgetRecommendation[]> {
@@ -399,6 +402,8 @@ export async function fetchRecommendedProducts({
         handle: product.handle,
         sourceMap,
       });
+      const recommendationType = classifyRecommendationType(product.title, product.handle);
+      const typeNeedsBtuMatching = isBtuSensitiveType(recommendationType);
       const isPreferredProduct =
         Boolean(productNumericId && preferredProductIdSet.has(productNumericId)) ||
         preferredHandleSet.has(normalizeHandle(product.handle)) ||
@@ -412,6 +417,7 @@ export async function fetchRecommendedProducts({
         score: number;
         variantId: string;
         variantTitle: string;
+        matchedBtu: number[];
         option: WidgetRecommendationVariant;
       }> = [];
 
@@ -440,6 +446,18 @@ export async function fetchRecommendedProducts({
           currentPercent,
           nextTier,
         });
+        const btuFit = getBtuFit({
+          cartBtuValues,
+          text: `${product.title} ${variant.title} ${product.handle}`,
+        });
+        if (
+          typeNeedsBtuMatching &&
+          cartBtuValues.length > 0 &&
+          btuFit.targetValues.length > 0 &&
+          btuFit.matchedValues.length === 0
+        ) {
+          continue;
+        }
 
         const score = scoreRecommendation({
           amountRemaining,
@@ -449,6 +467,7 @@ export async function fetchRecommendedProducts({
           preview,
           isPreferredProduct,
           relatedCartMatchCount: relatedCartItems.length,
+          btuMatchCount: btuFit.matchedValues.length,
         });
 
         if (score <= 0) continue;
@@ -457,6 +476,7 @@ export async function fetchRecommendedProducts({
           score,
           variantId: variantNumericId ?? variant.id,
           variantTitle: variant.title,
+          matchedBtu: btuFit.matchedValues,
           option: {
             variantId: variantNumericId ?? variant.id,
             variantTitle: variant.title,
@@ -489,7 +509,6 @@ export async function fetchRecommendedProducts({
 
       const variants = variantCandidates.slice(0, 4).map((candidate) => candidate.option);
       const best = variantCandidates[0];
-      const recommendationType = classifyRecommendationType(product.title, product.handle);
 
       const recommendation: WidgetRecommendation = {
           productId: productNumericId ?? product.id,
@@ -510,14 +529,15 @@ export async function fetchRecommendedProducts({
           benefitLabel: best.option.benefitLabel,
           recommendationType,
           recommendedFor: relatedCartItems,
+          recommendedForBtu: best.matchedBtu,
           variants,
           pricingSource: best.option.pricingSource,
         };
 
       const diversityBoost =
-        recommendationType === "Line set"
+        recommendationType === "Line Sets"
           ? 0
-          : recommendationType === "Other"
+          : recommendationType === "Accessories"
             ? 6
             : 18;
       const bestForProduct: RecommendationCandidate = {
@@ -766,29 +786,71 @@ function selectDiverseRecommendations(
 function classifyRecommendationType(title: string, handle: string): string {
   const haystack = `${String(title || "")} ${String(handle || "")}`.toLowerCase();
 
-  if (/(line\s*set|pre[-\s]?flared|flare|copper|line[\s-]?hide)/.test(haystack)) {
-    return "Line set";
+  if (/(line[\s-]?set[\s-]?(cover|duct)|line[\s-]?hide|decorative[\s-]?line)/.test(haystack)) {
+    return "Line set covers";
   }
-  if (/(mount|bracket|stand|pad|wall mount)/.test(haystack)) {
-    return "Mounting";
+  if (/(rubber\s*feet|rubber\s*foot|vibration|anti[-\s]?vibration|mounting\s*set)/.test(haystack)) {
+    return "Rubber Feet Mounting Set";
   }
-  if (/(disconnect|surge|wire|whip|breaker|electrical|voltage)/.test(haystack)) {
-    return "Electrical";
+  if (/(ground\s*stand|floor\s*stand|mini\s*split\s*stand)/.test(haystack)) {
+    return "Ground Stands";
   }
-  if (/(drain|pump|condensate|trap|float switch)/.test(haystack)) {
-    return "Drain";
+  if (/(wall\s*bracket|wall\s*mount|condenser\s*pad|\bpad\b|bracket)/.test(haystack)) {
+    return "Wall Brackets / Condenser Pad";
   }
-  if (/(cover|guard|protector|shield|snow|hail)/.test(haystack)) {
-    return "Protection";
-  }
-  if (/(remote|thermostat|controller|wifi|module|sensor)/.test(haystack)) {
-    return "Control";
-  }
-  if (/(filter|clean|coil|maintenance|kit|seal|insulation)/.test(haystack)) {
-    return "Maintenance";
+  if (/(line\s*set|pre[-\s]?flared|flare|copper)/.test(haystack)) {
+    return "Line Sets";
   }
 
-  return "Other";
+  return "Accessories";
+}
+
+function isBtuSensitiveType(type: string): boolean {
+  return type === "Line Sets" || type === "Line set covers";
+}
+
+function getBtuFit({
+  cartBtuValues,
+  text,
+}: {
+  cartBtuValues: number[];
+  text: string;
+}): { targetValues: number[]; matchedValues: number[] } {
+  const targets = extractBtuValuesFromText(text);
+  if (targets.length === 0 || cartBtuValues.length === 0) {
+    return { targetValues: targets, matchedValues: [] };
+  }
+
+  const matched = targets.filter((value) => cartBtuValues.some((cartBtu) => cartBtu === value));
+  return { targetValues: targets, matchedValues: matched };
+}
+
+function extractBtuValuesFromText(raw: string): number[] {
+  const text = String(raw || "").toUpperCase();
+  if (!text) return [];
+
+  const values = new Set<number>();
+  const add = (num: number) => {
+    if (!Number.isFinite(num)) return;
+    const normalized = Math.round(num);
+    if (normalized < 6000 || normalized > 60000) return;
+    values.add(normalized);
+  };
+
+  for (const match of text.matchAll(/\b(\d{1,2})\s*K\b/g)) {
+    add(Number(match[1]) * 1000);
+  }
+
+  for (const match of text.matchAll(/\b(\d{1,2}(?:,\d{3})|\d{4,5})\s*BTU\b/g)) {
+    add(Number(String(match[1]).replaceAll(",", "")));
+  }
+
+  for (const match of text.matchAll(/\b(\d{4,5})\s*[-/]\s*(\d{4,5})\s*BTU\b/g)) {
+    add(Number(match[1]));
+    add(Number(match[2]));
+  }
+
+  return Array.from(values).sort((a, b) => a - b);
 }
 
 function humanizeHandle(handle: string): string {
@@ -1159,6 +1221,7 @@ function scoreRecommendation({
   preview,
   isPreferredProduct,
   relatedCartMatchCount,
+  btuMatchCount,
 }: {
   amountRemaining: number;
   nextTier: Tier | null;
@@ -1167,6 +1230,7 @@ function scoreRecommendation({
   preview: PricingPreview;
   isPreferredProduct: boolean;
   relatedCartMatchCount: number;
+  btuMatchCount: number;
 }): number {
   let score = 0;
 
@@ -1175,6 +1239,9 @@ function scoreRecommendation({
   }
   if (relatedCartMatchCount > 0) {
     score += 140 + Math.min(relatedCartMatchCount, 3) * 45;
+  }
+  if (btuMatchCount > 0) {
+    score += 120 + Math.min(btuMatchCount, 2) * 35;
   }
 
   if (nextTier && amountRemaining > 0) {
