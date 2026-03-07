@@ -691,7 +691,21 @@ export async function deriveAccessoryHintsFromTecinfo({
     return { productIds, handles, context };
   }
 
-  const resolvedTecinfoUrl = normalizeTecinfoInputUrl(tecinfoUrl, requestOrigin);
+  const sourceHandles = Array.from(
+    new Set(
+      cartLines
+        .map((line) => normalizeHandle(line.handle || ""))
+        .filter(Boolean),
+    ),
+  ).slice(0, 8);
+
+  let resolvedTecinfoUrl = normalizeTecinfoInputUrl(tecinfoUrl, requestOrigin);
+  if (!resolvedTecinfoUrl) {
+    resolvedTecinfoUrl = await discoverTecinfoUrlFromProductPages({
+      requestOrigin,
+      handles: sourceHandles,
+    });
+  }
   if (!resolvedTecinfoUrl) {
     return { productIds, handles, context };
   }
@@ -806,6 +820,50 @@ function normalizeTecinfoInputUrl(raw: string | null, requestOrigin: string): st
   } catch {
     return "";
   }
+}
+
+async function discoverTecinfoUrlFromProductPages({
+  requestOrigin,
+  handles,
+}: {
+  requestOrigin: string;
+  handles: string[];
+}): Promise<string> {
+  for (const handle of handles) {
+    try {
+      const productUrl = new URL(`/products/${encodeURIComponent(handle)}`, requestOrigin).toString();
+      const response = await fetch(productUrl);
+      if (!response.ok) continue;
+      const html = await response.text();
+
+      const directMatch = html.match(
+        /data-techdata-json\s*=\s*["']([^"']+)["']/i,
+      );
+      if (directMatch?.[1]) {
+        const decoded = decodeHtmlEntities(directMatch[1]);
+        const resolved = normalizeTecinfoInputUrl(decoded, requestOrigin);
+        if (resolved) return resolved;
+      }
+
+      const assetRootMatch = html.match(/\/cdn\/shop\/t\/[^"'<>]+\/assets\//i);
+      if (assetRootMatch?.[0]) {
+        const baseUrl = new URL(assetRootMatch[0], requestOrigin);
+        const guessed = new URL("tecinfo.json", baseUrl).toString();
+        if (guessed) return guessed;
+      }
+    } catch {
+      // Ignore and try next handle.
+    }
+  }
+
+  return "";
+}
+
+function decodeHtmlEntities(raw: string): string {
+  return String(raw || "")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#34;/g, "\"")
+    .replace(/&amp;/g, "&");
 }
 
 function normalizeTecinfoRecords(raw: unknown): TecinfoRecord[] {
