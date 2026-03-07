@@ -3,6 +3,7 @@ import { authenticate } from "../shopify.server";
 import {
   type AccessoryContextLink,
   applyShadowCartExactPricing,
+  deriveAccessoryHintsFromTecinfo,
   fetchEngineConfiguredTiers,
   fetchRecommendedProducts,
   formatMoney,
@@ -100,20 +101,42 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   for (const id of cartVariantIds) {
     excludedVariantIds.add(id);
   }
-  const preferredAccessoryProductIds = new Set(
+  let preferredAccessoryProductIds = new Set(
     (url.searchParams.get("preferredAccessoryProductIds") || "")
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean),
   );
-  const preferredAccessoryHandles = new Set(
+  let preferredAccessoryHandles = new Set(
     (url.searchParams.get("preferredAccessoryHandles") || "")
       .split(",")
       .map((value) => value.trim().toLowerCase())
       .filter(Boolean),
   );
-  const accessoryContext = parseAccessoryContext(url.searchParams.get("accessoryContext"));
+  let accessoryContext = parseAccessoryContext(url.searchParams.get("accessoryContext"));
   const cartBtuValues = parseCartBtuValues(url.searchParams.get("cartBtuValues"));
+
+  if (
+    recommendationsEnabled &&
+    cartLines.length > 0 &&
+    preferredAccessoryProductIds.size === 0 &&
+    preferredAccessoryHandles.size === 0 &&
+    accessoryContext.length === 0
+  ) {
+    const fallbackHints = await deriveAccessoryHintsFromTecinfo({
+      tecinfoUrl: url.searchParams.get("tecinfoUrl"),
+      requestOrigin: `${url.protocol}//${url.host}`,
+      cartLines: cartLines.map((line) => ({
+        productId: line.productId,
+        handle: line.handle,
+        sku: line.sku,
+      })),
+    });
+
+    preferredAccessoryProductIds = fallbackHints.productIds;
+    preferredAccessoryHandles = fallbackHints.handles;
+    accessoryContext = fallbackHints.context;
+  }
 
   const progress = getTierProgress(
     subtotal,

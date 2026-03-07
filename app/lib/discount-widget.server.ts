@@ -623,6 +623,357 @@ export function parseNumber(value: string | null, defaultValue: number): number 
   return Number.isFinite(parsed) ? parsed : defaultValue;
 }
 
+type CartLineForAccessoryHints = {
+  productId: string;
+  handle: string;
+  sku: string;
+};
+
+type TecinfoAccessoryEntry = {
+  label?: string;
+  title?: string;
+  name?: string;
+  url?: string;
+  link?: string;
+  href?: string;
+  product_url?: string;
+  product_id?: string | number;
+  id?: string | number;
+  handle?: string;
+  category?: string;
+  type?: string;
+  alt_products?: Array<{
+    url?: string;
+    link?: string;
+    href?: string;
+    product_url?: string;
+    product_id?: string | number;
+    id?: string | number;
+    handle?: string;
+    category?: string;
+    type?: string;
+  }>;
+};
+
+type TecinfoRecord = {
+  sku?: string;
+  accessories?: TecinfoAccessoryEntry[];
+};
+
+const TECINFO_HINT_CACHE_TTL_MS = 5 * 60 * 1000;
+const TECINFO_HINT_CACHE = new Map<
+  string,
+  {
+    expiresAt: number;
+    bySku: Map<string, TecinfoRecord>;
+  }
+>();
+
+export async function deriveAccessoryHintsFromTecinfo({
+  tecinfoUrl,
+  requestOrigin,
+  cartLines,
+}: {
+  tecinfoUrl: string | null;
+  requestOrigin: string;
+  cartLines: CartLineForAccessoryHints[];
+}): Promise<{
+  productIds: Set<string>;
+  handles: Set<string>;
+  context: AccessoryContextLink[];
+}> {
+  const productIds = new Set<string>();
+  const handles = new Set<string>();
+  const context: AccessoryContextLink[] = [];
+  const seenContext = new Set<string>();
+
+  if (!Array.isArray(cartLines) || cartLines.length === 0) {
+    return { productIds, handles, context };
+  }
+
+  const resolvedTecinfoUrl = normalizeTecinfoInputUrl(tecinfoUrl, requestOrigin);
+  if (!resolvedTecinfoUrl) {
+    return { productIds, handles, context };
+  }
+
+  const tecinfoBySku = await fetchTecinfoSkuMap(resolvedTecinfoUrl);
+  if (!tecinfoBySku || tecinfoBySku.size === 0) {
+    return { productIds, handles, context };
+  }
+
+  for (const line of cartLines) {
+    const sourceProductId = String(line.productId || "").trim();
+    const sourceHandle = normalizeHandle(line.handle || "");
+    const skus = normalizeAndDedupeTecinfoSkus("", [line.sku]);
+    if (skus.length === 0) continue;
+
+    const seenSourceRecord = new Set<string>();
+
+    for (const sku of skus) {
+      const candidateSkus = [sku, ...deriveMrCoolComponentsFromSku(sku)];
+
+      for (const candidateSku of candidateSkus) {
+        const upSku = String(candidateSku || "").toUpperCase();
+        if (!upSku) continue;
+
+        const record =
+          tecinfoBySku.get(upSku) ?? fuzzyFindMrCoolTecinfoRecord(upSku, tecinfoBySku);
+        if (!record || !Array.isArray(record.accessories) || record.accessories.length === 0) {
+          continue;
+        }
+
+        const sourceRecordKey = `${sourceProductId || sourceHandle}::${String(record.sku || "").toUpperCase()}`;
+        if (seenSourceRecord.has(sourceRecordKey)) continue;
+        seenSourceRecord.add(sourceRecordKey);
+
+        const accessoryItems = normalizeTecinfoAccessoryList(record.accessories);
+        for (const item of accessoryItems) {
+          if (sourceProductId && item.productId && item.productId === sourceProductId) {
+            continue;
+          }
+          if (sourceHandle && item.handle && item.handle === sourceHandle) {
+            continue;
+          }
+
+          if (item.productId) productIds.add(item.productId);
+          if (item.handle) handles.add(item.handle);
+
+          if (!sourceHandle) continue;
+          if (!item.productId && !item.handle) continue;
+
+          const contextKey = `${item.productId}|${item.handle}|${sourceHandle}|${item.category}`;
+          if (seenContext.has(contextKey)) continue;
+          seenContext.add(contextKey);
+          context.push({
+            productId: item.productId,
+            handle: item.handle,
+            sourceHandle,
+            category: item.category,
+          });
+        }
+      }
+    }
+  }
+
+  return {
+    productIds: new Set(Array.from(productIds).slice(0, 120)),
+    handles: new Set(Array.from(handles).slice(0, 120)),
+    context: context.slice(0, 120),
+  };
+}
+
+async function fetchTecinfoSkuMap(tecinfoUrl: string): Promise<Map<string, TecinfoRecord> | null> {
+  const now = Date.now();
+  const cached = TECINFO_HINT_CACHE.get(tecinfoUrl);
+  if (cached && cached.expiresAt > now) {
+    return cached.bySku;
+  }
+
+  try {
+    const response = await fetch(tecinfoUrl);
+    if (!response.ok) return null;
+
+    const raw = (await response.json()) as unknown;
+    const normalizedRecords = normalizeTecinfoRecords(raw);
+    const bySku = new Map<string, TecinfoRecord>();
+
+    for (const record of normalizedRecords) {
+      if (!record || !record.sku) continue;
+      const upSku = String(record.sku).toUpperCase();
+      if (!upSku) continue;
+      bySku.set(upSku, record);
+    }
+
+    if (bySku.size === 0) return null;
+
+    TECINFO_HINT_CACHE.set(tecinfoUrl, {
+      expiresAt: now + TECINFO_HINT_CACHE_TTL_MS,
+      bySku,
+    });
+
+    return bySku;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeTecinfoInputUrl(raw: string | null, requestOrigin: string): string {
+  const value = String(raw || "").trim();
+  if (!value) return "";
+
+  try {
+    return new URL(value, requestOrigin).toString();
+  } catch {
+    return "";
+  }
+}
+
+function normalizeTecinfoRecords(raw: unknown): TecinfoRecord[] {
+  if (Array.isArray(raw)) return raw as TecinfoRecord[];
+  if (raw && typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    if (Array.isArray(obj.items)) return obj.items as TecinfoRecord[];
+    if (Array.isArray(obj.records)) return obj.records as TecinfoRecord[];
+    return [obj as TecinfoRecord];
+  }
+  return [];
+}
+
+function normalizeAndDedupeTecinfoSkus(prodSku: string, variantSkus: string[]): string[] {
+  const set = new Set<string>();
+  if (prodSku) set.add(String(prodSku));
+  for (const sku of variantSkus) {
+    if (sku) set.add(String(sku));
+  }
+
+  const cleaned: string[] = [];
+  for (const sku of set) {
+    for (const part of String(sku).split("+")) {
+      const normalized = normalizeTecinfoSkuPart(part);
+      if (normalized) cleaned.push(normalized);
+    }
+  }
+
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+  for (const sku of cleaned) {
+    const upSku = sku.toUpperCase();
+    if (seen.has(upSku)) continue;
+    seen.add(upSku);
+    deduped.push(sku);
+  }
+
+  return deduped;
+}
+
+function normalizeTecinfoSkuPart(skuPart: string): string {
+  return String(skuPart || "")
+    .trim()
+    .replace(/^(\d+)\s*[xX]\s*[-_]?/, "")
+    .replace(/^[xX]\s*(\d+)\s*[-_]?/, "")
+    .replace(/[-_]?[xX]\s*\d+$/, "")
+    .replace(/\d+\s*[xX]$/, "")
+    .trim();
+}
+
+function deriveMrCoolComponentsFromSku(baseSku: string): string[] {
+  const parts = String(baseSku || "").toUpperCase().split("-");
+  const hpIndex = parts.indexOf("HP");
+  if (hpIndex === -1) return [];
+
+  const head = parts.slice(0, hpIndex + 1);
+  const tail = parts.slice(hpIndex + 1);
+  const build = (insert: string) => [...head, insert, ...tail].join("-");
+  return [build("C"), build("WMAH"), build("MUAH")];
+}
+
+function fuzzyFindMrCoolTecinfoRecord(
+  sku: string,
+  bySku: Map<string, TecinfoRecord>,
+): TecinfoRecord | null {
+  const parts = String(sku || "").toUpperCase().split("-");
+  const hpIndex = parts.indexOf("HP");
+  if (hpIndex < 0 || hpIndex >= parts.length - 1) return null;
+
+  const headInsert = parts.slice(0, hpIndex + 2).join("-");
+  const tailWanted = parts.slice(hpIndex + 2).join("-").replace(/[0-9]/g, "");
+  const prefix = `${headInsert}-`;
+
+  for (const [candidateSku, record] of bySku.entries()) {
+    if (!candidateSku.startsWith(prefix)) continue;
+    const candidateTail = candidateSku.slice(prefix.length).replace(/[0-9]/g, "");
+    if (candidateTail === tailWanted) {
+      return record;
+    }
+  }
+
+  return null;
+}
+
+function normalizeTecinfoAccessoryList(
+  accessories: TecinfoAccessoryEntry[],
+): Array<{
+  productId: string;
+  handle: string;
+  category: string;
+}> {
+  const out: Array<{ productId: string; handle: string; category: string }> = [];
+  const seen = new Set<string>();
+
+  const pushOne = (
+    raw: TecinfoAccessoryEntry | (TecinfoAccessoryEntry["alt_products"] extends Array<infer T> ? T : never),
+    parent?: TecinfoAccessoryEntry,
+  ) => {
+    if (!raw) return;
+
+    const productId = String((raw as { product_id?: string | number; id?: string | number }).product_id ?? (raw as { id?: string | number }).id ?? "").trim();
+    const url = String(
+      (raw as { url?: string; link?: string; href?: string; product_url?: string }).url ??
+        (raw as { link?: string }).link ??
+        (raw as { href?: string }).href ??
+        (raw as { product_url?: string }).product_url ??
+        "",
+    ).trim();
+    const handle = normalizeHandle(
+      String((raw as { handle?: string }).handle || getHandleFromUrl(url)),
+    );
+    const label = String(
+      (raw as { label?: string; title?: string }).label ||
+        (raw as { title?: string }).title ||
+        parent?.label ||
+        parent?.title ||
+        parent?.name ||
+        "",
+    ).trim();
+    const categorySeed = String(
+      (raw as { category?: string; type?: string }).category ||
+        (raw as { type?: string }).type ||
+        parent?.category ||
+        parent?.type ||
+        "",
+    ).trim();
+    const category = normalizeAccessoryCategory(
+      categorySeed || classifyRecommendationType(label, handle),
+    );
+
+    const key = productId || handle || url;
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+
+    out.push({ productId, handle, category });
+  };
+
+  for (const item of accessories) {
+    if (!item) continue;
+    pushOne(item);
+    if (Array.isArray(item.alt_products)) {
+      for (const alt of item.alt_products) {
+        if (!alt) continue;
+        pushOne(alt, item);
+      }
+    }
+  }
+
+  return out;
+}
+
+function getHandleFromUrl(rawUrl: string): string {
+  const value = String(rawUrl || "").trim();
+  if (!value) return "";
+
+  try {
+    const parsed = new URL(value);
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    const productIndex = segments.indexOf("products");
+    if (productIndex > -1 && segments[productIndex + 1]) {
+      return segments[productIndex + 1];
+    }
+    return segments[segments.length - 1] || "";
+  } catch {
+    return "";
+  }
+}
+
 export async function applyShadowCartExactPricing({
   shop,
   currency,

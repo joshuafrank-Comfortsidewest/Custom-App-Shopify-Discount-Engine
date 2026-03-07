@@ -92,6 +92,11 @@
         const compactAccessoryLinks = (accessoryHints.links || []).slice(0, 24);
         const compactAccessoryProductIds = (accessoryHints.productIds || []).slice(0, 32);
         const compactAccessoryHandles = (accessoryHints.handles || []).slice(0, 32);
+        const resolvedTecinfoUrl = normalizeTecinfoUrl(
+          ACCESSORY_HINT_CACHE.tecinfoUrl ||
+            this.settings.tecinfoUrl ||
+            guessTecinfoUrlFromDocument(document),
+        );
         const failedVariantIds = getFailedVariantIds().slice(-40);
         const recommendationPoolSize = Math.min(
           18,
@@ -113,6 +118,7 @@
           cartVariantIds: compactCartLines.map((line) => line.variantId).join(","),
           cartLines: JSON.stringify(compactCartLines),
           cartBtuValues: cartBtuValues.join(","),
+          tecinfoUrl: resolvedTecinfoUrl,
           preferredAccessoryProductIds: compactAccessoryProductIds.join(","),
           preferredAccessoryHandles: compactAccessoryHandles.join(","),
           accessoryContext: JSON.stringify(
