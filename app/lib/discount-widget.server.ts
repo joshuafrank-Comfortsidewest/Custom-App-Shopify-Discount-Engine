@@ -379,9 +379,12 @@ export async function fetchRecommendedProducts({
       preferredAccessoryProductIds.size > 0 ||
       preferredAccessoryHandles.size > 0 ||
       accessoryContext.length > 0;
+    if (!hasAccessoryHints) {
+      return [];
+    }
     const poolTargetSize = Math.max(config.maxRecommendations * 10, 40);
     const fallbackProducts =
-      hasAccessoryHints || preferredProducts.length >= poolTargetSize
+      preferredProducts.length >= poolTargetSize
         ? []
         : await fetchFallbackProducts(admin, poolTargetSize - preferredProducts.length);
 
@@ -392,6 +395,7 @@ export async function fetchRecommendedProducts({
     const preferredHandleSet = new Set(
       Array.from(preferredAccessoryHandles).map((handle) => normalizeHandle(handle)),
     );
+    const hasPreferredHandles = preferredHandleSet.size > 0;
     const sourceMap = buildAccessorySourceMaps(accessoryContext);
 
     const currentPercent = Number.isFinite(currentDiscountPercent)
@@ -413,9 +417,9 @@ export async function fetchRecommendedProducts({
         continue;
       }
       if (hasAccessoryHints) {
-        const isAllowedAccessory =
-          Boolean(productNumericId && preferredProductIdSet.has(productNumericId)) ||
-          preferredHandleSet.has(normalizedProductHandle);
+        const isAllowedAccessory = hasPreferredHandles
+          ? preferredHandleSet.has(normalizedProductHandle)
+          : Boolean(productNumericId && preferredProductIdSet.has(productNumericId));
         if (!isAllowedAccessory) {
           continue;
         }
@@ -433,10 +437,12 @@ export async function fetchRecommendedProducts({
           sourceMap,
         }) || classifyRecommendationType(product.title, product.handle);
       const typeNeedsBtuMatching = isBtuSensitiveType(recommendationType);
-      const isPreferredProduct =
-        Boolean(productNumericId && preferredProductIdSet.has(productNumericId)) ||
-        preferredHandleSet.has(normalizedProductHandle) ||
-        relatedCartItems.length > 0;
+      const isPreferredProduct = Boolean(
+        (hasPreferredHandles
+          ? preferredHandleSet.has(normalizedProductHandle)
+          : Boolean(productNumericId && preferredProductIdSet.has(productNumericId))) ||
+          relatedCartItems.length > 0,
+      );
       const preferredCapMultiplier =
         recommendationType === "Line Sets"
           ? 4.5
@@ -1155,9 +1161,13 @@ async function fetchPreferredProducts({
   productIds: Set<string>;
   handles: Set<string>;
 }): Promise<ProductNode[]> {
-  const byIds = await fetchProductsByIds(admin, productIds);
   const byHandles = await fetchProductsByHandles(admin, handles);
-  return dedupeProducts([...byIds, ...byHandles]);
+  if (byHandles.length > 0) {
+    return dedupeProducts(byHandles);
+  }
+
+  const byIds = await fetchProductsByIds(admin, productIds);
+  return dedupeProducts(byIds);
 }
 
 async function fetchProductsByIds(

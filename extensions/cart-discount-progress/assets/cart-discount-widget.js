@@ -12,6 +12,8 @@
     tecinfoUrl: null,
     tecinfoMap: null,
     tecinfoLoading: null,
+    sourceByHandle: Object.create(null),
+    sourceLoadingByHandle: Object.create(null),
   };
   const RECOMMENDATION_TYPE_ORDER = [
     "Line set covers",
@@ -668,6 +670,8 @@
           quantity: Math.max(1, Number(item.quantity || 1)),
           sku: String(item.sku || "").trim(),
           handle: normalizeHandle(item.handle || item.product_handle || ""),
+          productTitle: String(item.product_title || "").trim(),
+          variantTitle: String(item.variant_title || "").trim(),
         };
       })
       .filter(Boolean);
@@ -745,29 +749,36 @@
     const seenLinks = new Set();
     const seenSourceRecord = new Set();
 
-    cartLines.forEach((line) => {
+    for (const line of cartLines) {
       const sourceHandle = normalizeHandle(line && line.handle);
       const sourceProductId = String((line && line.productId) || "").trim();
-      if (!sourceHandle && !sourceProductId) return;
+      if (!sourceHandle && !sourceProductId) continue;
 
-      const lineSkus = normalizeAndDedupeSkus("", [line.sku].filter(Boolean));
-      if (lineSkus.length === 0) return;
+      const sourceMeta = sourceHandle
+        ? await loadTechdataSourceForHandle(sourceHandle)
+        : null;
+      const sourceProdSku = String(sourceMeta && sourceMeta.prodSku ? sourceMeta.prodSku : "").trim();
+      const sourceVariantSkus = Array.isArray(sourceMeta && sourceMeta.variantSkus)
+        ? sourceMeta.variantSkus
+        : [];
+      const lineSkus = normalizeAndDedupeSkus(sourceProdSku, [line.sku, ...sourceVariantSkus].filter(Boolean));
+      if (lineSkus.length === 0) continue;
 
-      lineSkus.forEach((sku) => {
+      for (const sku of lineSkus) {
         const expanded = [sku, ...deriveMrCoolComponents(sku)];
 
-        expanded.forEach((candidateSku) => {
+        for (const candidateSku of expanded) {
           const key = String(candidateSku || "").toUpperCase();
-          if (!key) return;
+          if (!key) continue;
 
           let record = tecinfoMap[key] || null;
           if (!record) {
             record = fuzzyFindMrCoolRecord(key, tecinfoMap);
           }
-          if (!record) return;
+          if (!record) continue;
 
           const sourceRecordKey = `${sourceProductId || sourceHandle}::${String(record.sku || "").toUpperCase()}`;
-          if (seenSourceRecord.has(sourceRecordKey)) return;
+          if (seenSourceRecord.has(sourceRecordKey)) continue;
           seenSourceRecord.add(sourceRecordKey);
 
           const accessories = normalizeAccessoryList(record.accessories || []);
@@ -805,9 +816,9 @@
               category: accessoryCategory,
             });
           });
-        });
-      });
-    });
+        }
+      }
+    }
 
     return {
       productIds: productIds.slice(0, 80),
@@ -883,21 +894,8 @@
 
     for (const handle of handles) {
       try {
-        const response = await fetch(`/products/${encodeURIComponent(handle)}`, {
-          method: "GET",
-          credentials: "same-origin",
-        });
-        if (!response.ok) continue;
-
-        const html = await response.text();
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html, "text/html");
-        const source = doc.querySelector(
-          "#sms-techdata-source.tech-data-root, #sms-techdata-source, .tech-data-root[data-techdata-json]",
-        );
-        const tecinfoUrl = normalizeTecinfoUrl(
-          source && source.getAttribute("data-techdata-json"),
-        );
+        const source = await loadTechdataSourceForHandle(handle);
+        const tecinfoUrl = normalizeTecinfoUrl(source && source.tecinfoUrl);
         if (tecinfoUrl) {
           ACCESSORY_HINT_CACHE.tecinfoUrl = tecinfoUrl;
           return tecinfoUrl;
@@ -908,6 +906,72 @@
     }
 
     return normalizeTecinfoUrl(DEFAULT_TECINFO_URL);
+  }
+
+  async function loadTechdataSourceForHandle(handle) {
+    const normalizedHandle = normalizeHandle(handle);
+    if (!normalizedHandle) return null;
+    if (ACCESSORY_HINT_CACHE.sourceByHandle[normalizedHandle]) {
+      return ACCESSORY_HINT_CACHE.sourceByHandle[normalizedHandle];
+    }
+
+    if (!ACCESSORY_HINT_CACHE.sourceLoadingByHandle[normalizedHandle]) {
+      ACCESSORY_HINT_CACHE.sourceLoadingByHandle[normalizedHandle] = (async () => {
+        try {
+          const response = await fetch(`/products/${encodeURIComponent(normalizedHandle)}`, {
+            method: "GET",
+            credentials: "same-origin",
+          });
+          if (!response.ok) return null;
+
+          const html = await response.text();
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(html, "text/html");
+          const source = doc.querySelector(
+            "#sms-techdata-source.tech-data-root, #sms-techdata-source, .tech-data-root[data-techdata-json]",
+          );
+          if (!source) return null;
+
+          const parsed = {
+            tecinfoUrl: normalizeTecinfoUrl(source.getAttribute("data-techdata-json")),
+            prodSku: String(source.getAttribute("data-techdata-prod-sku") || "").trim(),
+            variantSkus: parseVariantSkus(source.getAttribute("data-techdata-variant-skus")),
+          };
+
+          ACCESSORY_HINT_CACHE.sourceByHandle[normalizedHandle] = parsed;
+          if (parsed.tecinfoUrl && !ACCESSORY_HINT_CACHE.tecinfoUrl) {
+            ACCESSORY_HINT_CACHE.tecinfoUrl = parsed.tecinfoUrl;
+          }
+          return parsed;
+        } catch {
+          return null;
+        }
+      })();
+    }
+
+    return ACCESSORY_HINT_CACHE.sourceLoadingByHandle[normalizedHandle];
+  }
+
+  function parseVariantSkus(raw) {
+    if (!raw) return [];
+    const parse = (value) => {
+      try {
+        const parsed = JSON.parse(String(value || "[]"));
+        if (!Array.isArray(parsed)) return [];
+        return parsed.map((entry) => String(entry || "").trim()).filter(Boolean);
+      } catch {
+        return [];
+      }
+    };
+
+    const firstPass = parse(raw);
+    if (firstPass.length > 0) return firstPass;
+
+    const unescaped = String(raw || "")
+      .replace(/&quot;/g, "\"")
+      .replace(/&#34;/g, "\"")
+      .replace(/&amp;/g, "&");
+    return parse(unescaped);
   }
 
   function normalizeTecinfoUrl(raw) {
