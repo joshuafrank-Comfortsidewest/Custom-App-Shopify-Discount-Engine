@@ -800,6 +800,15 @@ function selectDiverseRecommendations(
 function classifyRecommendationType(title: string, handle: string): string {
   const haystack = `${String(title || "")} ${String(handle || "")}`.toLowerCase();
 
+  if (/(conduit|cable|wire\s*kit|control\s*wire|signal\s*wire)/.test(haystack)) {
+    return "Conduit Cables";
+  }
+  if (/(heat\s*kit|heater\s*kit|aux\s*heat|strip\s*heat)/.test(haystack)) {
+    return "Heat Kit";
+  }
+  if (/(disconnect|disc\s*box|breaker\s*box|fused\s*disconnect|non[-\s]?fused)/.test(haystack)) {
+    return "Disconnect Box";
+  }
   if (/(line[\s-]?set[\s-]?(cover|duct)|line[\s-]?hide|decorative[\s-]?line)/.test(haystack)) {
     return "Line set covers";
   }

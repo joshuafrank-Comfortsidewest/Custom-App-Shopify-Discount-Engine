@@ -57,6 +57,7 @@
         const cartLines = buildCartLines(cart);
         const accessoryHints = await resolveCartAccessoryHints(cartLines);
         const currentDiscountPercent = getCurrentDiscountPercent(cart);
+        const cartBtuValues = extractCartBtuValuesFromCart(cart);
         const recommendationPoolSize = Math.min(
           18,
           Math.max(this.settings.maxRecommendations * 5, 12),
@@ -76,6 +77,7 @@
           cartProductIds: cartLines.map((line) => line.productId).join(","),
           cartVariantIds: cartLines.map((line) => line.variantId).join(","),
           cartLines: JSON.stringify(cartLines),
+          cartBtuValues: cartBtuValues.join(","),
           preferredAccessoryProductIds: accessoryHints.productIds.join(","),
           preferredAccessoryHandles: accessoryHints.handles.join(","),
           accessoryContext: JSON.stringify(
@@ -597,11 +599,50 @@
           quantity: Math.max(1, Number(item.quantity || 1)),
           sku: String(item.sku || "").trim(),
           handle: normalizeHandle(item.handle || item.product_handle || ""),
-          title: String(item.product_title || item.title || "").trim(),
-          variantTitle: String(item.variant_title || "").trim(),
         };
       })
       .filter(Boolean);
+  }
+
+  function extractCartBtuValuesFromCart(cart) {
+    const items = Array.isArray(cart && cart.items) ? cart.items : [];
+    const values = new Set();
+    items.forEach((item) => {
+      const source = `${item && item.sku ? item.sku : ""} ${item && item.product_title ? item.product_title : ""} ${item && item.variant_title ? item.variant_title : ""}`;
+      extractBtuValuesFromText(source).forEach((value) => values.add(value));
+    });
+    return Array.from(values).sort((a, b) => a - b).slice(0, 20);
+  }
+
+  function extractBtuValuesFromText(raw) {
+    const text = String(raw || "").toUpperCase();
+    if (!text) return [];
+
+    const values = new Set();
+    const add = (num) => {
+      const normalized = Math.round(Number(num));
+      if (!Number.isFinite(normalized)) return;
+      if (normalized < 6000 || normalized > 60000) return;
+      values.add(normalized);
+    };
+
+    const kMatches = text.matchAll(/\b(\d{1,2})\s*K\b/g);
+    for (const match of kMatches) {
+      add(Number(match[1]) * 1000);
+    }
+
+    const btuMatches = text.matchAll(/\b(\d{1,2}(?:,\d{3})|\d{4,5})\s*BTU\b/g);
+    for (const match of btuMatches) {
+      add(Number(String(match[1]).replaceAll(",", "")));
+    }
+
+    const rangeMatches = text.matchAll(/\b(\d{4,5})\s*[-/]\s*(\d{4,5})\s*BTU\b/g);
+    for (const match of rangeMatches) {
+      add(Number(match[1]));
+      add(Number(match[2]));
+    }
+
+    return Array.from(values).sort((a, b) => a - b);
   }
 
   function getCurrentDiscountPercent(cart) {

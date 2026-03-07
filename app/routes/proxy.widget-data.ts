@@ -20,8 +20,6 @@ type CartLinePayload = {
   variantId: string;
   sku: string;
   handle: string;
-  title: string;
-  variantTitle: string;
   quantity: number;
 };
 
@@ -115,7 +113,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       .filter(Boolean),
   );
   const accessoryContext = parseAccessoryContext(url.searchParams.get("accessoryContext"));
-  const cartBtuValues = extractCartBtuValues(cartLines);
+  const cartBtuValues = parseCartBtuValues(url.searchParams.get("cartBtuValues"));
 
   const progress = getTierProgress(
     subtotal,
@@ -236,8 +234,6 @@ function parseCartLines(raw: string | null): CartLinePayload[] {
           variantId: String(entry?.variantId || "").trim(),
           sku: String(entry?.sku || "").trim(),
           handle: String(entry?.handle || "").trim().toLowerCase(),
-          title: String(entry?.title || "").trim(),
-          variantTitle: String(entry?.variantTitle || "").trim(),
           quantity: Math.max(1, Math.floor(parseNumber(String(entry?.quantity ?? "1"), 1))),
         };
       })
@@ -280,41 +276,17 @@ function parseAccessoryContext(raw: string | null): AccessoryContextLink[] {
   }
 }
 
-function extractCartBtuValues(lines: CartLinePayload[]): number[] {
-  const values = new Set<number>();
-  for (const line of lines) {
-    const source = `${line.sku} ${line.title} ${line.variantTitle}`;
-    for (const value of extractBtuValuesFromText(source)) {
-      values.add(value);
-    }
-  }
-  return Array.from(values).sort((a, b) => a - b);
-}
-
-function extractBtuValuesFromText(raw: string): number[] {
-  const text = String(raw || "").toUpperCase();
-  if (!text) return [];
-
-  const values = new Set<number>();
-  const add = (num: number) => {
-    if (!Number.isFinite(num)) return;
-    const normalized = Math.round(num);
-    if (normalized < 6000 || normalized > 60000) return;
-    values.add(normalized);
-  };
-
-  for (const match of text.matchAll(/\b(\d{1,2})\s*K\b/g)) {
-    add(Number(match[1]) * 1000);
-  }
-
-  for (const match of text.matchAll(/\b(\d{1,2}(?:,\d{3})|\d{4,5})\s*BTU\b/g)) {
-    add(Number(String(match[1]).replaceAll(",", "")));
-  }
-
-  for (const match of text.matchAll(/\b(\d{4,5})\s*[-/]\s*(\d{4,5})\s*BTU\b/g)) {
-    add(Number(match[1]));
-    add(Number(match[2]));
-  }
-
-  return Array.from(values).sort((a, b) => a - b);
+function parseCartBtuValues(raw: string | null): number[] {
+  if (!raw) return [];
+  return Array.from(
+    new Set(
+      raw
+        .split(",")
+        .map((part) => Number(part.trim()))
+        .filter((value) => Number.isFinite(value) && value >= 6000 && value <= 60000)
+        .map((value) => Math.round(value)),
+    ),
+  )
+    .sort((a, b) => a - b)
+    .slice(0, 20);
 }
