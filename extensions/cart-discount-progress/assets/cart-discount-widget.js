@@ -58,6 +58,17 @@
         const accessoryHints = await resolveCartAccessoryHints(cartLines);
         const currentDiscountPercent = getCurrentDiscountPercent(cart);
         const cartBtuValues = extractCartBtuValuesFromCart(cart);
+        const compactCartLines = cartLines.slice(0, 24).map((line) => ({
+          productId: line.productId,
+          variantId: line.variantId,
+          quantity: Math.max(1, Number(line.quantity || 1)),
+          sku: String(line.sku || "").slice(0, 48),
+          handle: String(line.handle || "").slice(0, 80),
+        }));
+        const compactAccessoryLinks = (accessoryHints.links || []).slice(0, 24);
+        const compactAccessoryProductIds = (accessoryHints.productIds || []).slice(0, 32);
+        const compactAccessoryHandles = (accessoryHints.handles || []).slice(0, 32);
+        const failedVariantIds = getFailedVariantIds().slice(-40);
         const recommendationPoolSize = Math.min(
           18,
           Math.max(this.settings.maxRecommendations * 5, 12),
@@ -74,29 +85,60 @@
           recommendationsEnabled: String(this.settings.recommendationsEnabled),
           xyzHintEnabled: String(this.settings.xyzHintEnabled),
           xyzHintMessage: this.settings.xyzHintMessage,
-          cartProductIds: cartLines.map((line) => line.productId).join(","),
-          cartVariantIds: cartLines.map((line) => line.variantId).join(","),
-          cartLines: JSON.stringify(cartLines),
+          cartProductIds: compactCartLines.map((line) => line.productId).join(","),
+          cartVariantIds: compactCartLines.map((line) => line.variantId).join(","),
+          cartLines: JSON.stringify(compactCartLines),
           cartBtuValues: cartBtuValues.join(","),
-          preferredAccessoryProductIds: accessoryHints.productIds.join(","),
-          preferredAccessoryHandles: accessoryHints.handles.join(","),
+          preferredAccessoryProductIds: compactAccessoryProductIds.join(","),
+          preferredAccessoryHandles: compactAccessoryHandles.join(","),
           accessoryContext: JSON.stringify(
-            (accessoryHints.links || []).map((link) => ({
+            compactAccessoryLinks.map((link) => ({
               p: link.productId || "",
               h: link.handle || "",
               s: link.sourceHandle || "",
             })),
           ),
-          excludeVariantIds: getFailedVariantIds().join(","),
+          excludeVariantIds: failedVariantIds.join(","),
           currentDiscountPercent: String(currentDiscountPercent),
         });
 
-        const response = await fetch(`${this.settings.endpoint}?${params.toString()}`);
-        if (!response.ok) {
+        const fetchPayload = async (searchParams) => {
+          const response = await fetch(`${this.settings.endpoint}?${searchParams.toString()}`);
+          if (!response.ok) {
+            return { ok: false, status: response.status };
+          }
+          return { ok: true, payload: await response.json() };
+        };
+
+        let payloadResult = await fetchPayload(params);
+        if (!payloadResult.ok) {
+          const fallbackParams = new URLSearchParams({
+            subtotal: String((cart.items_subtotal_price || 0) / 100),
+            currency:
+              (window.Shopify && window.Shopify.currency && window.Shopify.currency.active) ||
+              "USD",
+            tiers: this.settings.tiers,
+            maxRecommendations: String(Math.max(4, this.settings.maxRecommendations)),
+            nearThresholdPercent: String(this.settings.nearThresholdPercent),
+            recommendationsEnabled: String(this.settings.recommendationsEnabled),
+            xyzHintEnabled: String(this.settings.xyzHintEnabled),
+            xyzHintMessage: this.settings.xyzHintMessage,
+            cartProductIds: compactCartLines.map((line) => line.productId).join(","),
+            cartVariantIds: compactCartLines.map((line) => line.variantId).join(","),
+            cartBtuValues: cartBtuValues.join(","),
+            currentDiscountPercent: String(currentDiscountPercent),
+          });
+
+          this.track("widget_fallback_request", { status: payloadResult.status });
+          payloadResult = await fetchPayload(fallbackParams);
+        }
+
+        if (!payloadResult.ok || !payloadResult.payload) {
           this.renderError("Could not load discount progress.");
           return;
         }
-        const payload = await response.json();
+
+        const payload = payloadResult.payload;
         this.latestResponse = payload;
         this.render(payload);
         this.track("widget_impression", {
