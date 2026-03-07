@@ -395,7 +395,6 @@ export async function fetchRecommendedProducts({
     const preferredHandleSet = new Set(
       Array.from(preferredAccessoryHandles).map((handle) => normalizeHandle(handle)),
     );
-    const hasPreferredHandles = preferredHandleSet.size > 0;
     const sourceMap = buildAccessorySourceMaps(accessoryContext);
 
     const currentPercent = Number.isFinite(currentDiscountPercent)
@@ -417,9 +416,9 @@ export async function fetchRecommendedProducts({
         continue;
       }
       if (hasAccessoryHints) {
-        const isAllowedAccessory = hasPreferredHandles
-          ? preferredHandleSet.has(normalizedProductHandle)
-          : Boolean(productNumericId && preferredProductIdSet.has(productNumericId));
+        const isAllowedAccessory =
+          Boolean(productNumericId && preferredProductIdSet.has(productNumericId)) ||
+          preferredHandleSet.has(normalizedProductHandle);
         if (!isAllowedAccessory) {
           continue;
         }
@@ -438,9 +437,8 @@ export async function fetchRecommendedProducts({
         }) || classifyRecommendationType(product.title, product.handle);
       const typeNeedsBtuMatching = isBtuSensitiveType(recommendationType);
       const isPreferredProduct = Boolean(
-        (hasPreferredHandles
-          ? preferredHandleSet.has(normalizedProductHandle)
-          : Boolean(productNumericId && preferredProductIdSet.has(productNumericId))) ||
+        Boolean(productNumericId && preferredProductIdSet.has(productNumericId)) ||
+          preferredHandleSet.has(normalizedProductHandle) ||
           relatedCartItems.length > 0,
       );
       const preferredCapMultiplier =
@@ -1162,12 +1160,8 @@ async function fetchPreferredProducts({
   handles: Set<string>;
 }): Promise<ProductNode[]> {
   const byHandles = await fetchProductsByHandles(admin, handles);
-  if (handles.size > 0) {
-    return dedupeProducts(byHandles);
-  }
-
   const byIds = await fetchProductsByIds(admin, productIds);
-  return dedupeProducts(byIds);
+  return dedupeProducts([...byHandles, ...byIds]);
 }
 
 async function fetchProductsByIds(

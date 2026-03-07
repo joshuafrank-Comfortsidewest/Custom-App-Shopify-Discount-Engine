@@ -883,6 +883,11 @@
       ACCESSORY_HINT_CACHE.tecinfoUrl = normalizedPageUrl;
       return normalizedPageUrl;
     }
+    const themeTecinfoUrl = normalizeTecinfoUrl(guessTecinfoUrlFromDocument(document));
+    if (themeTecinfoUrl) {
+      ACCESSORY_HINT_CACHE.tecinfoUrl = themeTecinfoUrl;
+      return themeTecinfoUrl;
+    }
 
     const handles = Array.from(
       new Set(
@@ -928,10 +933,27 @@
           const parser = new DOMParser();
           const doc = parser.parseFromString(html, "text/html");
           const source = doc.querySelector(TECHDATA_SOURCE_SELECTOR);
-          if (!source) return null;
+          const guessedTecinfoUrl = normalizeTecinfoUrl(guessTecinfoUrlFromDocument(doc));
+          if (!source) {
+            if (guessedTecinfoUrl) {
+              const fallback = {
+                tecinfoUrl: guessedTecinfoUrl,
+                prodSku: "",
+                variantSkus: [],
+              };
+              ACCESSORY_HINT_CACHE.sourceByHandle[normalizedHandle] = fallback;
+              if (!ACCESSORY_HINT_CACHE.tecinfoUrl) {
+                ACCESSORY_HINT_CACHE.tecinfoUrl = guessedTecinfoUrl;
+              }
+              return fallback;
+            }
+            return null;
+          }
 
           const parsed = {
-            tecinfoUrl: normalizeTecinfoUrl(source.getAttribute("data-techdata-json")),
+            tecinfoUrl:
+              normalizeTecinfoUrl(source.getAttribute("data-techdata-json")) ||
+              guessedTecinfoUrl,
             prodSku: String(source.getAttribute("data-techdata-prod-sku") || "").trim(),
             variantSkus: parseVariantSkus(source.getAttribute("data-techdata-variant-skus")),
           };
@@ -978,6 +1000,28 @@
     if (value.startsWith("http://") || value.startsWith("https://")) return value;
     if (value.startsWith("/")) return value;
     return `/${value.replace(/^\/+/, "")}`;
+  }
+
+  function guessTecinfoUrlFromDocument(doc) {
+    if (!doc || !doc.querySelectorAll) return "";
+    const nodes = doc.querySelectorAll("script[src], link[href]");
+    for (const node of nodes) {
+      const raw =
+        String(
+          (node.getAttribute && (node.getAttribute("src") || node.getAttribute("href"))) || "",
+        ).trim();
+      if (!raw) continue;
+      const match = raw.match(/\/cdn\/shop\/t\/[^/]+\/assets\//i);
+      if (!match) continue;
+      try {
+        const base = new URL(match[0], window.location.origin);
+        const tecinfo = new URL("tecinfo.json", base);
+        return tecinfo.href;
+      } catch {
+        // Keep trying.
+      }
+    }
+    return "";
   }
 
   function normalizeTecinfoDb(raw) {
