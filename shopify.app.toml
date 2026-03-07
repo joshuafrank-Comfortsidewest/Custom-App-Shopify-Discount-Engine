@@ -25,3 +25,8 @@ scopes = "read_customers,read_products,write_discounts,write_products"
 
 [auth]
 redirect_urls = [ "https://custom-app-shopify-discount-engine.onrender.com/auth/callback" ]
+
+[app_proxy]
+url = "https://custom-app-shopify-discount-engine.onrender.com/proxy"
+subpath = "discount-progress"
+prefix = "apps"
