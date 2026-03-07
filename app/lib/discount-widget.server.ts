@@ -408,8 +408,17 @@ export async function fetchRecommendedProducts({
 
     for (const product of products) {
       const productNumericId = extractNumericId(product.id);
+      const normalizedProductHandle = normalizeHandle(product.handle);
       if (productNumericId && cartProductIds.has(productNumericId)) {
         continue;
+      }
+      if (hasAccessoryHints) {
+        const isAllowedAccessory =
+          Boolean(productNumericId && preferredProductIdSet.has(productNumericId)) ||
+          preferredHandleSet.has(normalizedProductHandle);
+        if (!isAllowedAccessory) {
+          continue;
+        }
       }
 
       const relatedCartItems = getRelatedCartItemsForProduct({
@@ -426,7 +435,7 @@ export async function fetchRecommendedProducts({
       const typeNeedsBtuMatching = isBtuSensitiveType(recommendationType);
       const isPreferredProduct =
         Boolean(productNumericId && preferredProductIdSet.has(productNumericId)) ||
-        preferredHandleSet.has(normalizeHandle(product.handle)) ||
+        preferredHandleSet.has(normalizedProductHandle) ||
         relatedCartItems.length > 0;
       const preferredCapMultiplier =
         recommendationType === "Line Sets"
@@ -1215,7 +1224,12 @@ async function fetchProductsByHandles(
 
   if (!admin || sanitizedHandles.length === 0) return [];
 
-  const query = sanitizedHandles.map((handle) => `handle:${handle}`).join(" OR ");
+  const allowedHandleSet = new Set(
+    sanitizedHandles.map((handle) => normalizeHandle(handle)).filter(Boolean),
+  );
+  const query = sanitizedHandles
+    .map((handle) => `handle:'${escapeShopifySearchValue(handle)}'`)
+    .join(" OR ");
   const response = await admin.graphql(
     `#graphql
       query DiscountProgressProductsByHandles($first: Int!, $query: String!) {
@@ -1260,7 +1274,10 @@ async function fetchProductsByHandles(
     };
   };
 
-  return (json.data?.products?.nodes ?? []).filter((node) => isProductNode(node));
+  return (json.data?.products?.nodes ?? []).filter(
+    (node) =>
+      isProductNode(node) && allowedHandleSet.has(normalizeHandle(node.handle)),
+  );
 }
 
 async function fetchFallbackProducts(
@@ -1349,6 +1366,10 @@ function calculatePricingPreview({
     unlocksNextTier,
     effectivelyFree: projectedItemNet <= 0.01,
   };
+}
+
+function escapeShopifySearchValue(value: string): string {
+  return String(value || "").replace(/['\\]/g, "\\$&");
 }
 
 function scoreRecommendation({

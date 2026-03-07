@@ -1030,7 +1030,11 @@
         pushItem(item);
         (item.alt_products || []).forEach((alt) => {
           if (!alt) return;
-          pushItem(alt);
+          pushItem({
+            ...alt,
+            label: item.label || item.title || item.name || alt.label || alt.title || "",
+            category: item.category || item.type || alt.category || alt.type || "",
+          });
         });
       }
     });
