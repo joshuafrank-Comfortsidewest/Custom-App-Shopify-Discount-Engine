@@ -53,6 +53,7 @@
         const cart = await cartResponse.json();
         const cartLines = buildCartLines(cart);
         const accessoryHints = await resolveCartAccessoryHints(cartLines);
+        const currentDiscountPercent = getCurrentDiscountPercent(cart);
 
         const params = new URLSearchParams({
           subtotal: String((cart.items_subtotal_price || 0) / 100),
@@ -70,6 +71,7 @@
           preferredAccessoryProductIds: accessoryHints.productIds.join(","),
           preferredAccessoryHandles: accessoryHints.handles.join(","),
           excludeVariantIds: getFailedVariantIds().join(","),
+          currentDiscountPercent: String(currentDiscountPercent),
         });
 
         const response = await fetch(`${this.settings.endpoint}?${params.toString()}`);
@@ -268,6 +270,19 @@
         };
       })
       .filter(Boolean);
+  }
+
+  function getCurrentDiscountPercent(cart) {
+    const originalTotal = Number(cart && cart.original_total_price);
+    const discountedTotal = Number(cart && cart.total_price);
+
+    if (!Number.isFinite(originalTotal) || originalTotal <= 0 || !Number.isFinite(discountedTotal)) {
+      return 0;
+    }
+
+    const percent = ((originalTotal - discountedTotal) / originalTotal) * 100;
+    const rounded = Math.round(percent * 100) / 100;
+    return Math.max(0, Math.min(100, rounded));
   }
 
   async function resolveCartAccessoryHints(cartLines) {

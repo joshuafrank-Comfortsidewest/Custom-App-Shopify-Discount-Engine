@@ -222,19 +222,44 @@ export function getTierProgress(
   subtotal: number,
   tiers: Tier[],
   nearThresholdPercent: number,
+  currentDiscountPercent?: number,
 ): TierProgress {
   const safeSubtotal = Number.isFinite(subtotal) ? Math.max(0, subtotal) : 0;
-  const currentTier =
+  const safeCurrentDiscountPercent = Number.isFinite(currentDiscountPercent)
+    ? clamp(Number(currentDiscountPercent), 0, 100)
+    : null;
+
+  const currentTierBySubtotal =
     [...tiers].reverse().find((tier) => safeSubtotal >= tier.targetAmount) ?? null;
-  const nextTier = tiers.find((tier) => safeSubtotal < tier.targetAmount) ?? null;
+  const nextTierBySubtotal = tiers.find((tier) => safeSubtotal < tier.targetAmount) ?? null;
+
+  let currentTier = currentTierBySubtotal;
+  let nextTier = nextTierBySubtotal;
+
+  if (safeCurrentDiscountPercent !== null) {
+    currentTier =
+      [...tiers].reverse().find((tier) => safeCurrentDiscountPercent >= tier.percent) ?? null;
+    nextTier = tiers.find((tier) => safeCurrentDiscountPercent < tier.percent) ?? null;
+  }
+
   const amountRemaining = nextTier
     ? Math.max(0, roundMoney(nextTier.targetAmount - safeSubtotal))
     : 0;
 
-  const progressPercent = nextTier
-    ? clamp((safeSubtotal / nextTier.targetAmount) * 100, 0, 100)
-    : 100;
-  const journeyProgressPercent = getTierJourneyProgress(safeSubtotal, tiers);
+  const progressPercent =
+    safeCurrentDiscountPercent !== null
+      ? nextTier
+        ? clamp((safeCurrentDiscountPercent / nextTier.percent) * 100, 0, 100)
+        : 100
+      : nextTier
+        ? clamp((safeSubtotal / nextTier.targetAmount) * 100, 0, 100)
+        : 100;
+
+  const maxTierPercent = tiers.length > 0 ? tiers[tiers.length - 1].percent : 100;
+  const journeyProgressPercent =
+    safeCurrentDiscountPercent !== null
+      ? clamp((safeCurrentDiscountPercent / maxTierPercent) * 100, 0, 100)
+      : getTierJourneyProgress(safeSubtotal, tiers);
 
   const gapBase = nextTier?.targetAmount ?? 0;
   const nearThreshold =
@@ -258,6 +283,7 @@ export async function fetchRecommendedProducts({
   subtotal,
   tiers,
   currentTier,
+  currentDiscountPercent,
   nextTier,
   amountRemaining,
   cartProductIds,
@@ -271,6 +297,7 @@ export async function fetchRecommendedProducts({
   subtotal: number;
   tiers: Tier[];
   currentTier: Tier | null;
+  currentDiscountPercent?: number | null;
   nextTier: Tier | null;
   amountRemaining: number;
   cartProductIds: Set<string>;
@@ -309,7 +336,9 @@ export async function fetchRecommendedProducts({
       Array.from(preferredAccessoryHandles).map((handle) => normalizeHandle(handle)),
     );
 
-    const currentPercent = currentTier?.percent ?? 0;
+    const currentPercent = Number.isFinite(currentDiscountPercent)
+      ? clamp(Number(currentDiscountPercent), 0, 100)
+      : currentTier?.percent ?? 0;
     const basePriceCap = getBasePriceCap({
       subtotal,
       amountRemaining,

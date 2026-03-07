@@ -51,6 +51,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       ),
     ),
   );
+  const currentDiscountPercentRaw = parseNumber(
+    url.searchParams.get("currentDiscountPercent"),
+    -1,
+  );
+  const currentDiscountPercent =
+    Number.isFinite(currentDiscountPercentRaw) && currentDiscountPercentRaw >= 0
+      ? Math.max(0, Math.min(100, currentDiscountPercentRaw))
+      : null;
   const recommendationsEnabled = parseBoolean(
     url.searchParams.get("recommendationsEnabled"),
     true,
@@ -90,7 +98,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       .filter(Boolean),
   );
 
-  const progress = getTierProgress(subtotal, tiers, nearThresholdPercent);
+  const progress = getTierProgress(
+    subtotal,
+    tiers,
+    nearThresholdPercent,
+    currentDiscountPercent ?? undefined,
+  );
+  const subtotalImpliedTier =
+    [...tiers].reverse().find((tier) => subtotal >= tier.targetAmount) ?? null;
+  const useCurrentDiscountOverride = Boolean(
+    currentDiscountPercent !== null &&
+      subtotalImpliedTier &&
+      currentDiscountPercent + 0.1 < subtotalImpliedTier.percent,
+  );
 
   const recommendations = recommendationsEnabled
       ? await fetchRecommendedProducts({
@@ -98,6 +118,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           subtotal,
           tiers,
           currentTier: progress.currentTier,
+          currentDiscountPercent,
           amountRemaining: progress.amountRemaining,
           nextTier: progress.nextTier,
           cartProductIds,
@@ -109,20 +130,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         })
     : [];
 
-  const primaryMessage = progress.nextTier
-    ? progress.amountRemaining > 0
-      ? `${formatMoney(progress.amountRemaining, currency)} away from ${progress.nextTier.code} (${progress.nextTier.percent}%)`
-      : `Unlocked ${progress.nextTier.code} (${progress.nextTier.percent}%)`
-    : progress.currentTier
-      ? `You unlocked ${progress.currentTier.code} (${progress.currentTier.percent}%)`
-      : "Add items to unlock your first bulk discount";
+  const primaryMessage = useCurrentDiscountOverride
+    ? progress.nextTier
+      ? `Current cart discount: ${formatPercent(currentDiscountPercent!)}. Next bulk tier: ${progress.nextTier.code} (${progress.nextTier.percent}%).`
+      : `Current cart discount: ${formatPercent(currentDiscountPercent!)}.`
+    : progress.nextTier
+      ? progress.amountRemaining > 0
+        ? `${formatMoney(progress.amountRemaining, currency)} away from ${progress.nextTier.code} (${progress.nextTier.percent}%)`
+        : `Unlocked ${progress.nextTier.code} (${progress.nextTier.percent}%)`
+      : progress.currentTier
+        ? `You unlocked ${progress.currentTier.code} (${progress.currentTier.percent}%)`
+        : "Add items to unlock your first bulk discount";
 
   const secondaryMessage =
-    xyzHintEnabled && progress.amountRemaining > 0 ? xyzHintMessage : null;
+    useCurrentDiscountOverride
+      ? "Bulk tiers apply only to qualifying items."
+      : xyzHintEnabled && progress.amountRemaining > 0
+        ? xyzHintMessage
+        : null;
 
   return Response.json({
     subtotal,
     currency,
+    currentDiscountPercent,
     currentTier: progress.currentTier,
     nextTier: progress.nextTier,
     amountRemaining: progress.amountRemaining,
@@ -134,13 +164,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       primaryMessage,
       secondaryMessage,
       recommendationHeading:
-        progress.nextTier && progress.amountRemaining > 0
+        progress.nextTier && (progress.amountRemaining > 0 || useCurrentDiscountOverride)
           ? "Recommended to unlock next tier"
           : "Recommended for your cart",
       configSource: engineTiers.length > 0 ? "smart_discount_engine" : "widget_settings",
     },
   });
 };
+
+function formatPercent(value: number): string {
+  const rounded = Math.round(value * 100) / 100;
+  const normalized = Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(2);
+  return `${normalized}%`;
+}
 
 function parseCartLines(raw: string | null): CartLinePayload[] {
   if (!raw) return [];
