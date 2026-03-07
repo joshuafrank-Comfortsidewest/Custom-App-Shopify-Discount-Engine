@@ -37,7 +37,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const maxRecommendations = Math.max(
     0,
     Math.min(
-      6,
+      18,
       Math.floor(
         parseNumber(
           url.searchParams.get("maxRecommendations"),

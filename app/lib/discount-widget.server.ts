@@ -106,8 +106,8 @@ type RecommendationCandidate = {
 
 const DEFAULT_TIERS = "100:5,250:10,400:13,600:15";
 const SHADOW_CART_CACHE_TTL_MS = 90 * 1000;
-const SHADOW_CART_MAX_PREVIEW_ITEMS = 2;
-const SHADOW_CART_MAX_PREVIEW_VARIANTS = 2;
+const SHADOW_CART_MAX_PREVIEW_ITEMS = 10;
+const SHADOW_CART_MAX_PREVIEW_VARIANTS = 4;
 const SHADOW_CART_CACHE = new Map<string, { expiresAt: number; subtotal: number }>();
 
 type EngineConfigTierPayload = {
@@ -408,9 +408,23 @@ export async function fetchRecommendedProducts({
         Boolean(productNumericId && preferredProductIdSet.has(productNumericId)) ||
         preferredHandleSet.has(normalizeHandle(product.handle)) ||
         relatedCartItems.length > 0;
+      const preferredCapMultiplier =
+        recommendationType === "Line Sets"
+          ? 4.5
+          : recommendationType === "Line set covers"
+            ? 3.2
+            : 2.2;
+      const preferredMinCap =
+        recommendationType === "Line Sets"
+          ? 350
+          : recommendationType === "Line set covers"
+            ? 120
+            : 0;
 
       const maxVariantPrice = roundMoney(
-        isPreferredProduct ? basePriceCap * 2.2 : basePriceCap,
+        isPreferredProduct
+          ? Math.max(basePriceCap * preferredCapMultiplier, preferredMinCap)
+          : basePriceCap,
       );
 
       const variantCandidates: Array<{
@@ -507,7 +521,7 @@ export async function fetchRecommendedProducts({
         return a.option.estimatedNetPrice - b.option.estimatedNetPrice;
       });
 
-      const variants = variantCandidates.slice(0, 4).map((candidate) => candidate.option);
+      const variants = variantCandidates.slice(0, 6).map((candidate) => candidate.option);
       const best = variantCandidates[0];
 
       const recommendation: WidgetRecommendation = {

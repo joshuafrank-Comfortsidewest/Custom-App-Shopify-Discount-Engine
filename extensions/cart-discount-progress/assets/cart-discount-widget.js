@@ -57,7 +57,10 @@
         const cartLines = buildCartLines(cart);
         const accessoryHints = await resolveCartAccessoryHints(cartLines);
         const currentDiscountPercent = getCurrentDiscountPercent(cart);
-        const recommendationPoolSize = Math.max(this.settings.maxRecommendations + 2, 4);
+        const recommendationPoolSize = Math.min(
+          18,
+          Math.max(this.settings.maxRecommendations * 5, 12),
+        );
 
         const params = new URLSearchParams({
           subtotal: String((cart.items_subtotal_price || 0) / 100),
@@ -107,7 +110,12 @@
 
     render(data) {
       const recommendations = Array.isArray(data.recommendations) ? data.recommendations : [];
-      const defaultVisibleCount = Math.max(1, Number(this.settings.maxRecommendations || 2));
+      const defaultVisibleCount = Math.max(3, Number(this.settings.maxRecommendations || 2));
+      const recommendationTypeCounts = Object.create(null);
+      recommendations.forEach((item) => {
+        const type = normalizeRecommendationType(item && item.recommendationType);
+        recommendationTypeCounts[type] = Number(recommendationTypeCounts[type] || 0) + 1;
+      });
       const recommendationTypes = Array.from(
         new Set(
           recommendations
@@ -182,7 +190,7 @@
                               class="cdp-type-tab ${this.selectedRecommendationType === type ? "cdp-type-tab--active" : ""}"
                               data-cdp-type="${escapeAttr(type)}"
                             >
-                              ${escapeHtml(type)}
+                              ${escapeHtml(type)} (${Number(recommendationTypeCounts[type] || 0)})
                             </button>
                           `,
                         )
