@@ -259,6 +259,9 @@ function parseAccessoryContext(raw: string | null): AccessoryContextLink[] {
         const sourceHandle = String(entry?.sourceHandle || entry?.s || "")
           .trim()
           .toLowerCase();
+        const category = String(entry?.category || entry?.c || "")
+          .trim()
+          .toLowerCase();
 
         if (!productId && !handle) return null;
         if (!sourceHandle) return null;
@@ -267,6 +270,7 @@ function parseAccessoryContext(raw: string | null): AccessoryContextLink[] {
           productId,
           handle,
           sourceHandle,
+          category,
         };
       })
       .filter((entry): entry is AccessoryContextLink => entry !== null)

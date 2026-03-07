@@ -7,6 +7,7 @@
     currency: "USD",
     maximumFractionDigits: 2,
   });
+  const DEFAULT_TECINFO_URL = "/assets/tecinfo.json";
   const ACCESSORY_HINT_CACHE = {
     tecinfoUrl: null,
     tecinfoMap: null,
@@ -31,6 +32,10 @@
     constructor(root) {
       this.root = root;
       this.settings = this.readSettings(root.dataset);
+      const configuredTecinfoUrl = normalizeTecinfoUrl(this.settings.tecinfoUrl);
+      if (configuredTecinfoUrl && !ACCESSORY_HINT_CACHE.tecinfoUrl) {
+        ACCESSORY_HINT_CACHE.tecinfoUrl = configuredTecinfoUrl;
+      }
       this.latestResponse = null;
       this.expandedRecommendations = false;
       this.selectedRecommendationType = "";
@@ -40,6 +45,7 @@
     readSettings(dataset) {
       return {
         endpoint: dataset.endpoint || "/apps/discount-progress/widget-data",
+        tecinfoUrl: dataset.tecinfoUrl || DEFAULT_TECINFO_URL,
         tiers: dataset.tiers || "100:5,250:10,400:13,600:15",
         maxRecommendations: Number(dataset.maxRecommendations || 2),
         nearThresholdPercent: Number(dataset.nearThresholdPercent || 20),
@@ -110,6 +116,7 @@
               p: link.productId || "",
               h: link.handle || "",
               s: link.sourceHandle || "",
+              c: link.category || "",
             })),
           ),
           excludeVariantIds: failedVariantIds.join(","),
@@ -767,6 +774,7 @@
           accessories.forEach((item) => {
             const accessoryProductId = String(item.productId || "").trim();
             const accessoryHandle = normalizeHandle(item.handle);
+            const accessoryCategory = normalizeAccessoryCategory(item.category || "");
 
             if (sourceProductId && accessoryProductId && sourceProductId === accessoryProductId) {
               return;
@@ -784,7 +792,7 @@
               handles.push(accessoryHandle);
             }
 
-            const linkKey = `${accessoryProductId}|${accessoryHandle}|${sourceHandle}`;
+            const linkKey = `${accessoryProductId}|${accessoryHandle}|${sourceHandle}|${accessoryCategory}`;
             if (!accessoryProductId && !accessoryHandle) return;
             if (!sourceHandle) return;
             if (seenLinks.has(linkKey)) return;
@@ -794,6 +802,7 @@
               productId: accessoryProductId,
               handle: accessoryHandle,
               sourceHandle,
+              category: accessoryCategory,
             });
           });
         });
@@ -814,27 +823,35 @@
 
     if (!ACCESSORY_HINT_CACHE.tecinfoLoading) {
       ACCESSORY_HINT_CACHE.tecinfoLoading = (async () => {
-        const tecinfoUrl = await discoverTecinfoUrl(cartLines);
-        if (!tecinfoUrl) return null;
-        ACCESSORY_HINT_CACHE.tecinfoUrl = tecinfoUrl;
+        const discoveredTecinfoUrl = await discoverTecinfoUrl(cartLines);
+        const candidateUrls = [discoveredTecinfoUrl, DEFAULT_TECINFO_URL]
+          .map((value) => normalizeTecinfoUrl(value))
+          .filter(Boolean)
+          .filter((value, index, list) => list.indexOf(value) === index);
 
-        try {
-          const response = await fetch(tecinfoUrl, { cache: "force-cache" });
-          if (!response.ok) return null;
-          const raw = await response.json();
-          const db = normalizeTecinfoDb(raw);
-          const map = Object.create(null);
+        for (const tecinfoUrl of candidateUrls) {
+          try {
+            const response = await fetch(tecinfoUrl, { cache: "force-cache" });
+            if (!response.ok) continue;
 
-          db.forEach((entry) => {
-            if (!entry || !entry.sku) return;
-            map[String(entry.sku).toUpperCase()] = entry;
-          });
+            const raw = await response.json();
+            const db = normalizeTecinfoDb(raw);
+            const map = Object.create(null);
 
-          ACCESSORY_HINT_CACHE.tecinfoMap = map;
-          return map;
-        } catch {
-          return null;
+            db.forEach((entry) => {
+              if (!entry || !entry.sku) return;
+              map[String(entry.sku).toUpperCase()] = entry;
+            });
+
+            ACCESSORY_HINT_CACHE.tecinfoUrl = tecinfoUrl;
+            ACCESSORY_HINT_CACHE.tecinfoMap = map;
+            return map;
+          } catch {
+            // Try next candidate URL.
+          }
         }
+
+        return null;
       })();
     }
 
@@ -844,6 +861,16 @@
   async function discoverTecinfoUrl(cartLines) {
     if (ACCESSORY_HINT_CACHE.tecinfoUrl) {
       return ACCESSORY_HINT_CACHE.tecinfoUrl;
+    }
+
+    const pageSource = document.querySelector(
+      "#sms-techdata-source.tech-data-root, #sms-techdata-source, .tech-data-root[data-techdata-json]",
+    );
+    const pageTecinfoUrl = pageSource && pageSource.getAttribute("data-techdata-json");
+    const normalizedPageUrl = normalizeTecinfoUrl(pageTecinfoUrl);
+    if (normalizedPageUrl) {
+      ACCESSORY_HINT_CACHE.tecinfoUrl = normalizedPageUrl;
+      return normalizedPageUrl;
     }
 
     const handles = Array.from(
@@ -868,7 +895,9 @@
         const source = doc.querySelector(
           "#sms-techdata-source.tech-data-root, #sms-techdata-source, .tech-data-root[data-techdata-json]",
         );
-        const tecinfoUrl = source && source.getAttribute("data-techdata-json");
+        const tecinfoUrl = normalizeTecinfoUrl(
+          source && source.getAttribute("data-techdata-json"),
+        );
         if (tecinfoUrl) {
           ACCESSORY_HINT_CACHE.tecinfoUrl = tecinfoUrl;
           return tecinfoUrl;
@@ -878,7 +907,15 @@
       }
     }
 
-    return null;
+    return normalizeTecinfoUrl(DEFAULT_TECINFO_URL);
+  }
+
+  function normalizeTecinfoUrl(raw) {
+    const value = String(raw || "").trim();
+    if (!value) return "";
+    if (value.startsWith("http://") || value.startsWith("https://")) return value;
+    if (value.startsWith("/")) return value;
+    return `/${value.replace(/^\/+/, "")}`;
   }
 
   function normalizeTecinfoDb(raw) {
@@ -972,10 +1009,15 @@
       const url =
         String(raw.url || raw.link || raw.href || raw.product_url || "").trim();
       const handle = normalizeHandle(raw.handle || getHandleFromUrl(url));
+      const label = String(raw.label || raw.title || "").trim();
+      const explicitCategory = normalizeAccessoryCategory(
+        raw.category || raw.type || "",
+      );
+      const category = explicitCategory || classifyAccessoryTypeFromText(`${label} ${handle} ${url}`);
       const key = productId || handle || url;
       if (!key || seen[key]) return;
       seen[key] = 1;
-      out.push({ productId, handle, url });
+      out.push({ productId, handle, url, category });
     };
 
     accessories.forEach((item) => {
@@ -994,6 +1036,29 @@
     });
 
     return out;
+  }
+
+  function classifyAccessoryTypeFromText(raw) {
+    const text = String(raw || "").toLowerCase();
+    if (!text) return "";
+    if (/\b(line[\s-]?set|installation kit|pre[-\s]?flared|copper)\b/.test(text) || /\b\d+ft\b/.test(text) || /1\/4|3\/8|1\/2|5\/8/.test(text)) return "Line Sets";
+    if (/\b(cover|duct|pvc)\b/.test(text) && /line/.test(text)) return "Line set covers";
+    if (/\b(bracket|wall bracket|condenser pad|pad)\b/.test(text)) return "Wall Brackets / Condenser Pad";
+    if (/\b(heat kit|heater|kw)\b/.test(text)) return "Heat Kit";
+    if (/\b(clean|flush|coil cleaner)\b/.test(text)) return "Cleaning Kit";
+    if (/\b(coupler|union)\b/.test(text)) return "Couplers";
+    if (/\b(thermostat|smart.*stat)\b/.test(text)) return "Thermostat";
+    if (/\b(conduit|cable|whip|data wire)\b/.test(text)) return "Conduit Cables";
+    if (/\b(disconnect|fusible|non[-\s]?fusible)\b/.test(text)) return "Disconnect Box";
+    if (/\b(rubber feet|anti[-\s]?vibration)\b/.test(text)) return "Rubber Feet Mounting Set";
+    if (/\b(stand|ground stand)\b/.test(text)) return "Ground Stands";
+    return "Accessories";
+  }
+
+  function normalizeAccessoryCategory(raw) {
+    const category = String(raw || "").trim();
+    if (!category) return "";
+    return classifyAccessoryTypeFromText(category);
   }
 
   function getHandleFromUrl(url) {

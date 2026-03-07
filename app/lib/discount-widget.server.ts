@@ -40,6 +40,7 @@ export type AccessoryContextLink = {
   productId: string;
   handle: string;
   sourceHandle: string;
+  category: string;
 };
 
 export type WidgetRecommendationVariant = {
@@ -123,81 +124,6 @@ const RECOMMENDATION_TYPE_ORDER = [
   "Ground Stands",
   "Accessories",
 ] as const;
-const RECOMMENDATION_TYPE_PRODUCT_IDS: Record<string, Set<string>> = {
-  "Line set covers": new Set([
-    "7420475277427",
-    "7784329478259",
-    "8004649517171",
-    "8004667080819",
-    "8053617295475",
-  ]),
-  "Line Sets": new Set([
-    "8056140103795",
-    "7347732283507",
-    "8014110228595",
-    "8014232748147",
-    "8014250672243",
-    "8014258929779",
-    "8014268104819",
-    "8052349042803",
-    "8048835068019",
-    "8014321451123",
-    "7871035375731",
-    "7871312920691",
-    "7347983646835",
-    "7871070437491",
-    "7871408996467",
-    "7346828476531",
-    "7871160057971",
-    "7871417024627",
-    "7346841485427",
-    "7347980533875",
-    "7871217598579",
-    "8037632344179",
-    "8036342694003",
-    "8036336730227",
-    "8036351639667",
-    "8036331913331",
-    "8055997857907",
-    "8056020729971",
-  ]),
-  "Wall Brackets / Condenser Pad": new Set([
-    "8111079882867",
-    "7855248081011",
-    "8004737138803",
-    "8004764401779",
-    "7850596696179",
-    "8004698243187",
-    "7420483698803",
-  ]),
-  "Heat Kit": new Set([
-    "7932186591347",
-    "7932195995763",
-    "7932199600243",
-    "7932201205875",
-    "7932202352755",
-    "7992329470067",
-    "7992329994355",
-    "7992330780787",
-    "7992328749171",
-    "7842623127667",
-    "7842622210163",
-    "7812784914547",
-    "7842621751411",
-    "8014096859251",
-    "8014095286387",
-    "8014094467187",
-    "8014092697715",
-    "8014080573555",
-  ]),
-  "Cleaning Kit": new Set(["7855129690227"]),
-  Couplers: new Set(["7855235006579", "7855238676595"]),
-  Thermostat: new Set(["7800311185523", "8056167891059", "8056169431155", "8062486544499"]),
-  "Conduit Cables": new Set(["7850574938227"]),
-  "Disconnect Box": new Set(["7850581426291", "8004678910067", "7850578018419"]),
-  "Rubber Feet Mounting Set": new Set(["8004578836595"]),
-  "Ground Stands": new Set(["8004777836659", "7784261976179", "7784222031987"]),
-};
 
 type EngineConfigTierPayload = {
   toggles?: {
@@ -491,11 +417,12 @@ export async function fetchRecommendedProducts({
         handle: product.handle,
         sourceMap,
       });
-      const recommendationType = classifyRecommendationType(
-        product.title,
-        product.handle,
-        productNumericId,
-      );
+      const recommendationType =
+        getAccessoryTypeForProduct({
+          productId: productNumericId,
+          handle: product.handle,
+          sourceMap,
+        }) || classifyRecommendationType(product.title, product.handle);
       const typeNeedsBtuMatching = isBtuSensitiveType(recommendationType);
       const isPreferredProduct =
         Boolean(productNumericId && preferredProductIdSet.has(productNumericId)) ||
@@ -800,14 +727,19 @@ export async function applyShadowCartExactPricing({
 function buildAccessorySourceMaps(accessoryContext: AccessoryContextLink[]): {
   byProductId: Map<string, Set<string>>;
   byHandle: Map<string, Set<string>>;
+  byProductIdCategory: Map<string, Map<string, number>>;
+  byHandleCategory: Map<string, Map<string, number>>;
 } {
   const byProductId = new Map<string, Set<string>>();
   const byHandle = new Map<string, Set<string>>();
+  const byProductIdCategory = new Map<string, Map<string, number>>();
+  const byHandleCategory = new Map<string, Map<string, number>>();
 
   for (const item of accessoryContext) {
     const productId = String(item.productId || "").trim();
     const handle = normalizeHandle(item.handle);
     const sourceHandle = normalizeHandle(item.sourceHandle);
+    const category = normalizeAccessoryCategory(item.category || "");
     if (!sourceHandle) continue;
 
     const sourceLabel = humanizeHandle(sourceHandle);
@@ -815,15 +747,25 @@ function buildAccessorySourceMaps(accessoryContext: AccessoryContextLink[]): {
     if (productId) {
       if (!byProductId.has(productId)) byProductId.set(productId, new Set<string>());
       byProductId.get(productId)!.add(sourceLabel);
+      if (category) {
+        if (!byProductIdCategory.has(productId)) byProductIdCategory.set(productId, new Map());
+        const categoryCounts = byProductIdCategory.get(productId)!;
+        categoryCounts.set(category, Number(categoryCounts.get(category) || 0) + 1);
+      }
     }
 
     if (handle) {
       if (!byHandle.has(handle)) byHandle.set(handle, new Set<string>());
       byHandle.get(handle)!.add(sourceLabel);
+      if (category) {
+        if (!byHandleCategory.has(handle)) byHandleCategory.set(handle, new Map());
+        const categoryCounts = byHandleCategory.get(handle)!;
+        categoryCounts.set(category, Number(categoryCounts.get(category) || 0) + 1);
+      }
     }
   }
 
-  return { byProductId, byHandle };
+  return { byProductId, byHandle, byProductIdCategory, byHandleCategory };
 }
 
 function getRelatedCartItemsForProduct({
@@ -836,6 +778,8 @@ function getRelatedCartItemsForProduct({
   sourceMap: {
     byProductId: Map<string, Set<string>>;
     byHandle: Map<string, Set<string>>;
+    byProductIdCategory: Map<string, Map<string, number>>;
+    byHandleCategory: Map<string, Map<string, number>>;
   };
 }): string[] {
   const labels = new Set<string>();
@@ -854,6 +798,40 @@ function getRelatedCartItemsForProduct({
   }
 
   return Array.from(labels).slice(0, 3);
+}
+
+function getAccessoryTypeForProduct({
+  productId,
+  handle,
+  sourceMap,
+}: {
+  productId: string | null;
+  handle: string;
+  sourceMap: {
+    byProductId: Map<string, Set<string>>;
+    byHandle: Map<string, Set<string>>;
+    byProductIdCategory: Map<string, Map<string, number>>;
+    byHandleCategory: Map<string, Map<string, number>>;
+  };
+}): string | null {
+  const normalizedHandle = normalizeHandle(handle);
+  const counts = new Map<string, number>();
+  const mergeCounts = (source?: Map<string, number>) => {
+    if (!source) return;
+    for (const [category, count] of source.entries()) {
+      counts.set(category, Number(counts.get(category) || 0) + Number(count || 0));
+    }
+  };
+
+  if (productId) mergeCounts(sourceMap.byProductIdCategory.get(productId));
+  if (normalizedHandle) mergeCounts(sourceMap.byHandleCategory.get(normalizedHandle));
+  if (counts.size === 0) return null;
+
+  const ranked = Array.from(counts.entries()).sort((a, b) => {
+    if (b[1] !== a[1]) return b[1] - a[1];
+    return recommendationTypeOrderIndex(a[0]) - recommendationTypeOrderIndex(b[0]);
+  });
+  return ranked[0]?.[0] ?? null;
 }
 
 function selectDiverseRecommendations(
@@ -890,19 +868,7 @@ function selectDiverseRecommendations(
   return selected;
 }
 
-function classifyRecommendationType(
-  title: string,
-  handle: string,
-  productId: string | null,
-): string {
-  const pid = String(productId || "").trim();
-  if (pid) {
-    for (const type of RECOMMENDATION_TYPE_ORDER) {
-      const set = RECOMMENDATION_TYPE_PRODUCT_IDS[type];
-      if (set && set.has(pid)) return type;
-    }
-  }
-
+function classifyRecommendationType(title: string, handle: string): string {
   const haystack = `${String(title || "")} ${String(handle || "")}`.toLowerCase();
 
   if (/(conduit|cable|wire\s*kit|control\s*wire|signal\s*wire)/.test(haystack)) {
@@ -931,6 +897,50 @@ function classifyRecommendationType(
   }
 
   return "Accessories";
+}
+
+function normalizeAccessoryCategory(raw: string): string {
+  const text = String(raw || "").trim().toLowerCase();
+  if (!text) return "";
+  if (/line[\s-]?set[\s-]?(cover|duct)|line[\s-]?hide|decorative[\s-]?line/.test(text)) {
+    return "Line set covers";
+  }
+  if (/line[\s-]?set|installation kit|pre[-\s]?flared|copper/.test(text)) {
+    return "Line Sets";
+  }
+  if (/wall\s*bracket|condenser\s*pad|\bpad\b|bracket/.test(text)) {
+    return "Wall Brackets / Condenser Pad";
+  }
+  if (/heat\s*kit|heater\s*kit|aux\s*heat|strip\s*heat/.test(text)) {
+    return "Heat Kit";
+  }
+  if (/clean|flush|coil cleaner|maintenance/.test(text)) {
+    return "Cleaning Kit";
+  }
+  if (/coupler|union/.test(text)) {
+    return "Couplers";
+  }
+  if (/thermostat|controller|wifi|sensor/.test(text)) {
+    return "Thermostat";
+  }
+  if (/conduit|cable|wire|whip/.test(text)) {
+    return "Conduit Cables";
+  }
+  if (/disconnect|fused|non[-\s]?fused|breaker/.test(text)) {
+    return "Disconnect Box";
+  }
+  if (/rubber feet|anti[-\s]?vibration|mounting set/.test(text)) {
+    return "Rubber Feet Mounting Set";
+  }
+  if (/ground stand|floor stand|stand/.test(text)) {
+    return "Ground Stands";
+  }
+  return "Accessories";
+}
+
+function recommendationTypeOrderIndex(type: string): number {
+  const idx = RECOMMENDATION_TYPE_ORDER.indexOf(type as (typeof RECOMMENDATION_TYPE_ORDER)[number]);
+  return idx === -1 ? RECOMMENDATION_TYPE_ORDER.length + 1 : idx;
 }
 
 function isBtuSensitiveType(type: string): boolean {

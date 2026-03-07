@@ -8,6 +8,7 @@
   class="cdp-widget-host"
   data-cdp-host
   data-endpoint="{{ endpoint }}"
+  data-tecinfo-url="{{ block.settings.tecinfo_url | escape }}"
   data-tiers="{{ block.settings.bulk_tiers | escape }}"
   data-max-recommendations="{{ block.settings.max_recommendations }}"
   data-near-threshold-percent="{{ block.settings.near_threshold_percent }}"
@@ -25,6 +26,13 @@
   "name": "Discount Progress Embed",
   "target": "body",
   "settings": [
+    {
+      "type": "text",
+      "id": "tecinfo_url",
+      "label": "Tecinfo JSON URL",
+      "default": "/assets/tecinfo.json",
+      "info": "Theme asset URL used to map accessories, usually /assets/tecinfo.json."
+    },
     {
       "type": "text",
       "id": "drawer_selectors",
