@@ -1,28 +1,168 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
+import {
+  fetchEngineConfiguredTiers,
+  fetchRecommendedProducts,
+  formatMoney,
+  getTierProgress,
+  parseBoolean,
+  parseNumber,
+  parseTiers,
+} from "../lib/discount-widget.server";
+
+const DEFAULT_MAX_RECOMMENDATIONS = 2;
+const DEFAULT_NEAR_THRESHOLD_PERCENT = 20;
+
+type CartLinePayload = {
+  productId: string;
+  variantId: string;
+  sku: string;
+  handle: string;
+};
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.public.appProxy(request);
-
+  const { admin } = await authenticate.public.appProxy(request);
   const url = new URL(request.url);
-  const subtotal = Number(url.searchParams.get("subtotal") || "0");
+
+  const subtotal = Math.max(0, parseNumber(url.searchParams.get("subtotal"), 0));
   const currency = url.searchParams.get("currency") || "USD";
+  const engineTiers = await fetchEngineConfiguredTiers(admin);
+  const tiers = engineTiers.length > 0 ? engineTiers : parseTiers(url.searchParams.get("tiers"));
+
+  const maxRecommendations = Math.max(
+    0,
+    Math.min(
+      6,
+      Math.floor(
+        parseNumber(
+          url.searchParams.get("maxRecommendations"),
+          DEFAULT_MAX_RECOMMENDATIONS,
+        ),
+      ),
+    ),
+  );
+  const nearThresholdPercent = Math.max(
+    0,
+    Math.min(
+      100,
+      parseNumber(
+        url.searchParams.get("nearThresholdPercent"),
+        DEFAULT_NEAR_THRESHOLD_PERCENT,
+      ),
+    ),
+  );
+  const recommendationsEnabled = parseBoolean(
+    url.searchParams.get("recommendationsEnabled"),
+    true,
+  );
+  const xyzHintEnabled = parseBoolean(url.searchParams.get("xyzHintEnabled"), false);
+  const xyzHintMessage =
+    url.searchParams.get("xyzHintMessage") ||
+    "Add qualifying collection items to improve your total discount.";
+
+  const cartLines = parseCartLines(url.searchParams.get("cartLines"));
+  const cartProductIds = new Set(
+    (url.searchParams.get("cartProductIds") || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
+  );
+  for (const line of cartLines) {
+    if (line.productId) cartProductIds.add(line.productId);
+  }
+
+  const excludedVariantIds = new Set(
+    (url.searchParams.get("excludeVariantIds") || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
+  );
+  const preferredAccessoryProductIds = new Set(
+    (url.searchParams.get("preferredAccessoryProductIds") || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
+  );
+  const preferredAccessoryHandles = new Set(
+    (url.searchParams.get("preferredAccessoryHandles") || "")
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean),
+  );
+
+  const progress = getTierProgress(subtotal, tiers, nearThresholdPercent);
+
+  const recommendations = recommendationsEnabled
+      ? await fetchRecommendedProducts({
+          admin,
+          subtotal,
+          tiers,
+          currentTier: progress.currentTier,
+          amountRemaining: progress.amountRemaining,
+          nextTier: progress.nextTier,
+          cartProductIds,
+          excludedVariantIds,
+          preferredAccessoryProductIds,
+          preferredAccessoryHandles,
+          currency,
+          config: { maxRecommendations, nearThresholdPercent },
+        })
+    : [];
+
+  const primaryMessage = progress.nextTier
+    ? progress.amountRemaining > 0
+      ? `${formatMoney(progress.amountRemaining, currency)} away from ${progress.nextTier.code} (${progress.nextTier.percent}%)`
+      : `Unlocked ${progress.nextTier.code} (${progress.nextTier.percent}%)`
+    : progress.currentTier
+      ? `You unlocked ${progress.currentTier.code} (${progress.currentTier.percent}%)`
+      : "Add items to unlock your first bulk discount";
+
+  const secondaryMessage =
+    xyzHintEnabled && progress.amountRemaining > 0 ? xyzHintMessage : null;
 
   return Response.json({
     subtotal,
     currency,
-    currentTier: null,
-    nextTier: null,
-    amountRemaining: 0,
-    progressPercent: 0,
-    journeyProgressPercent: 0,
-    nearThreshold: false,
-    recommendations: [],
+    currentTier: progress.currentTier,
+    nextTier: progress.nextTier,
+    amountRemaining: progress.amountRemaining,
+    progressPercent: progress.progressPercent,
+    journeyProgressPercent: progress.journeyProgressPercent,
+    nearThreshold: progress.nearThreshold,
+    recommendations,
     labels: {
-      primaryMessage: "Add items to unlock your first bulk discount",
-      secondaryMessage: null,
-      recommendationHeading: "Recommended for your cart",
-      configSource: "widget_settings",
+      primaryMessage,
+      secondaryMessage,
+      recommendationHeading:
+        progress.nextTier && progress.amountRemaining > 0
+          ? "Recommended to unlock next tier"
+          : "Recommended for your cart",
+      configSource: engineTiers.length > 0 ? "smart_discount_engine" : "widget_settings",
     },
   });
 };
+
+function parseCartLines(raw: string | null): CartLinePayload[] {
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .map((entry) => {
+        const productId = String(entry?.productId || "").trim();
+        if (!productId) return null;
+
+        return {
+          productId,
+          variantId: String(entry?.variantId || "").trim(),
+          sku: String(entry?.sku || "").trim(),
+          handle: String(entry?.handle || "").trim().toLowerCase(),
+        };
+      })
+      .filter((line): line is CartLinePayload => line !== null);
+  } catch {
+    return [];
+  }
+}
