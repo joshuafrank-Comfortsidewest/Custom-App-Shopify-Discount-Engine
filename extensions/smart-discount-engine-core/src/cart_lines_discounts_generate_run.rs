@@ -128,6 +128,7 @@ struct HvacRuleConfig {
     max_indoor_per_outdoor: f64,
     percent_off_hvac_products: f64,
     amount_off_outdoor_per_bundle: f64,
+    percent_selection_mode: String,
     indoor_product_ids: Vec<String>,
     outdoor_product_ids: Vec<String>,
     combination_rules: Vec<HvacCombinationRuleConfig>,
@@ -156,6 +157,7 @@ impl Default for HvacRuleConfig {
             max_indoor_per_outdoor: 6.0,
             percent_off_hvac_products: 0.0,
             amount_off_outdoor_per_bundle: 0.0,
+            percent_selection_mode: "hvac_only_exclusive_best".to_string(),
             indoor_product_ids: vec![],
             outdoor_product_ids: vec![],
             combination_rules: vec![],
@@ -418,6 +420,8 @@ fn cart_lines_discounts_generate_run(
         .first_order
         .max(discount_percents.bulk)
         .max(discount_percents.vip);
+    let hvac_percent_includes_base =
+        hvac_percent_selection_includes_base(&config.hvac_rule.percent_selection_mode);
 
     let mut candidates: Vec<schema::ProductDiscountCandidate> = vec![];
 
@@ -429,8 +433,7 @@ fn cart_lines_discounts_generate_run(
         let mut hvac_fixed_stackable_amount_total: f64 = 0.0;
         let mut hvac_fixed_exclusive_qty: i32 = 0;
         let mut hvac_fixed_exclusive_amount_total: f64 = 0.0;
-        let mut hvac_stackable_percent_sum: f64 = 0.0;
-        let mut hvac_exclusive_percent_best: f64 = 0.0;
+        let mut hvac_percent_exclusive_best: f64 = 0.0;
         let mut hvac_percent_units_requested: i32 = 0;
         let fixed_amount_per_item = config.collection_spend_rule.amount_off_per_step.max(0.0);
         let line_id = line.id().to_string();
@@ -459,12 +462,9 @@ fn cart_lines_discounts_generate_run(
             for rule in hvac_active_rules.iter() {
                 let rule_percent_qty = *rule.percent_target_qty_by_line.get(&line_id).unwrap_or(&0);
                 if rule_percent_qty > 0 && rule.percent_off > 0.0 {
-                    hvac_percent_units_requested = hvac_percent_units_requested.max(rule_percent_qty);
-                    if rule.stack_mode == "stackable" {
-                        hvac_stackable_percent_sum += rule.percent_off;
-                    } else {
-                        hvac_exclusive_percent_best = hvac_exclusive_percent_best.max(rule.percent_off);
-                    }
+                    hvac_percent_units_requested =
+                        hvac_percent_units_requested.max(rule_percent_qty);
+                    hvac_percent_exclusive_best = hvac_percent_exclusive_best.max(rule.percent_off);
                 }
                 let fixed_on_line = *rule.fixed_target_qty_by_line.get(&line_id).unwrap_or(&0);
                 if fixed_on_line > 0 && rule.amount_off_outdoor_per_bundle > 0.0 {
@@ -485,6 +485,11 @@ fn cart_lines_discounts_generate_run(
         }
 
         let base_percent_candidate = order_level_percent.max(item_percent);
+        let hvac_percent_candidate = resolve_hvac_percent_candidate(
+            base_percent_candidate,
+            hvac_percent_exclusive_best,
+            hvac_percent_includes_base,
+        );
         let current_promo_source = current_promo_attribution(&discount_percents, item_percent);
         if hvac_fixed_exclusive_qty > 0 {
             let hvac_fixed_per_item =
@@ -516,11 +521,25 @@ fn cart_lines_discounts_generate_run(
             let hvac_fixed_per_item =
                 hvac_fixed_stackable_amount_total / (hvac_fixed_stackable_qty as f64);
             let after_hvac_price = (line_unit_price - hvac_fixed_per_item).max(0.0);
-            // Apply base percentage after HVAC fixed amount, per requested order:
+            // Apply selected percentage after HVAC fixed amount:
             // (unit_price - hvac_amount) -> then percentage.
             let stacked_per_item =
-                hvac_fixed_per_item + (after_hvac_price * (base_percent_candidate / 100.0));
+                hvac_fixed_per_item + (after_hvac_price * (hvac_percent_candidate / 100.0));
             let stacked_per_item_capped = stacked_per_item.min(line_unit_price).max(0.0);
+            let message = if hvac_percent_candidate > 0.0 {
+                format!(
+                    "Bundle discount: ${} off + {}% on {} outdoor unit(s)",
+                    fmt_percent(hvac_fixed_per_item),
+                    fmt_percent(hvac_percent_candidate),
+                    hvac_fixed_stackable_qty
+                )
+            } else {
+                format!(
+                    "Bundle discount: ${} off on {} outdoor unit(s)",
+                    fmt_percent(hvac_fixed_per_item.min(line_unit_price).max(0.0)),
+                    hvac_fixed_stackable_qty
+                )
+            };
             candidates.push(schema::ProductDiscountCandidate {
                 targets: vec![schema::ProductDiscountCandidateTarget::CartLine(
                     schema::CartLineTarget {
@@ -528,12 +547,7 @@ fn cart_lines_discounts_generate_run(
                         quantity: Some(hvac_fixed_stackable_qty),
                     },
                 )],
-                message: Some(format!(
-                    "Bundle discount: ${} off + {}% on {} outdoor unit(s)",
-                    fmt_percent(hvac_fixed_per_item),
-                    fmt_percent(base_percent_candidate),
-                    hvac_fixed_stackable_qty
-                )),
+                message: Some(message),
                 value: schema::ProductDiscountCandidateValue::FixedAmount(
                     schema::ProductDiscountCandidateFixedAmount {
                         amount: Decimal(stacked_per_item_capped),
@@ -548,13 +562,17 @@ fn cart_lines_discounts_generate_run(
         let remaining_qty: i32 = (line_qty - fixed_qty - hvac_fixed_qty_total).max(0);
         let hvac_percent_qty = remaining_qty.min(hvac_percent_units_requested.max(0));
         let non_hvac_percent_qty = (remaining_qty - hvac_percent_qty).max(0);
-        let hvac_stackable_with_base = (base_percent_candidate + hvac_stackable_percent_sum).min(100.0);
-        let hvac_exclusive_with_base = base_percent_candidate.max(hvac_exclusive_percent_best);
-        let hvac_percent_candidate = hvac_stackable_with_base.max(hvac_exclusive_with_base);
-        let bundle_percent_contributed = hvac_percent_candidate > (base_percent_candidate + 0.0001);
-        let hvac_percent_attribution = if bundle_percent_contributed && base_percent_candidate > 0.0 {
-            format!("{} + Bundle discount", current_promo_source)
-        } else if bundle_percent_contributed {
+        let bundle_percent_contributed =
+            hvac_percent_exclusive_best > (base_percent_candidate + 0.0001);
+        let hvac_percent_attribution = if hvac_percent_includes_base {
+            if bundle_percent_contributed && base_percent_candidate > 0.0 {
+                format!("{} + Bundle discount", current_promo_source)
+            } else if bundle_percent_contributed {
+                "Bundle discount".to_string()
+            } else {
+                current_promo_source.clone()
+            }
+        } else if hvac_percent_candidate > 0.0 {
             "Bundle discount".to_string()
         } else {
             current_promo_source.clone()
@@ -734,7 +752,11 @@ fn active_hvac_rules(
                 continue;
             }
             let subtotal = line.cost().subtotal_amount().amount().0;
-            let unit_price = if qty > 0 { subtotal / (qty as f64) } else { 0.0 };
+            let unit_price = if qty > 0 {
+                subtotal / (qty as f64)
+            } else {
+                0.0
+            };
             let entry = lines_by_product.entry(pid).or_default();
             entry.push(LineUnit {
                 line_id: line.id().to_string(),
@@ -746,7 +768,10 @@ fn active_hvac_rules(
 
     let mut candidate_rules: Vec<HvacActiveRule> = vec![];
     for rule in config.hvac_rule.combination_rules.iter() {
-        if !rule.enabled || rule.outdoor_product_ids.is_empty() || rule.indoor_product_ids.is_empty() {
+        if !rule.enabled
+            || rule.outdoor_product_ids.is_empty()
+            || rule.indoor_product_ids.is_empty()
+        {
             continue;
         }
         let outdoor_products: HashSet<String> = rule
@@ -845,10 +870,7 @@ fn active_hvac_rules(
     active
 }
 
-fn allocate_high_value_units(
-    units: &[LineUnit],
-    target_qty: i32,
-) -> (HashMap<String, i32>, f64) {
+fn allocate_high_value_units(units: &[LineUnit], target_qty: i32) -> (HashMap<String, i32>, f64) {
     if target_qty <= 0 || units.is_empty() {
         return (HashMap::new(), 0.0);
     }
@@ -915,14 +937,32 @@ fn state_match(state: &str, active: bool) -> bool {
     }
 }
 
+fn hvac_percent_selection_includes_base(mode: &str) -> bool {
+    mode == "best_of_hvac_and_base"
+}
+
+fn resolve_hvac_percent_candidate(
+    base_percent_candidate: f64,
+    hvac_percent_exclusive_best: f64,
+    include_base: bool,
+) -> f64 {
+    if include_base {
+        base_percent_candidate.max(hvac_percent_exclusive_best)
+    } else {
+        hvac_percent_exclusive_best
+    }
+}
+
 fn vip_tag_to_percent(tag: &str) -> Option<f64> {
     if !tag.starts_with("VIP") {
         return None;
     }
-    tag[3..]
-        .parse::<f64>()
-        .ok()
-        .filter(|value| (3.0..=15.0).contains(value))
+    let value = tag[3..].parse::<u8>().ok()?;
+    if (1..=99).contains(&value) {
+        Some(value as f64)
+    } else {
+        None
+    }
 }
 
 fn item_off_tag_to_percent(tag: &str) -> Option<f64> {
@@ -930,7 +970,11 @@ fn item_off_tag_to_percent(tag: &str) -> Option<f64> {
     if !normalized.ends_with(" off") {
         return None;
     }
-    let value = normalized.trim_end_matches(" off").trim().parse::<f64>().ok()?;
+    let value = normalized
+        .trim_end_matches(" off")
+        .trim()
+        .parse::<f64>()
+        .ok()?;
     if (0.0..=100.0).contains(&value) {
         Some(value)
     } else {
@@ -971,7 +1015,11 @@ fn resolve_runtime_config_json(primary: Option<&str>, chunks: &[Option<&str>]) -
                         }
                     }
                 }
-                return if joined.is_empty() { None } else { Some(joined) };
+                return if joined.is_empty() {
+                    None
+                } else {
+                    Some(joined)
+                };
             }
         }
         if !raw.is_empty() {
@@ -1148,5 +1196,29 @@ mod tests {
         assert_eq!(by_line.get("line-c").copied().unwrap_or(0), 1);
         assert_eq!(by_line.get("line-a").copied().unwrap_or(0), 0);
         assert!((subtotal - 80.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn vip_tags_support_1_to_99() {
+        assert_eq!(vip_tag_to_percent("VIP1"), Some(1.0));
+        assert_eq!(vip_tag_to_percent("VIP9"), Some(9.0));
+        assert_eq!(vip_tag_to_percent("VIP15"), Some(15.0));
+        assert_eq!(vip_tag_to_percent("VIP99"), Some(99.0));
+        assert_eq!(vip_tag_to_percent("VIP0"), None);
+        assert_eq!(vip_tag_to_percent("VIP100"), None);
+        assert_eq!(vip_tag_to_percent("VIPX"), None);
+    }
+
+    #[test]
+    fn hvac_percent_candidate_respects_selection_mode() {
+        assert!(!hvac_percent_selection_includes_base(
+            "hvac_only_exclusive_best"
+        ));
+        assert!(hvac_percent_selection_includes_base(
+            "best_of_hvac_and_base"
+        ));
+        assert_eq!(resolve_hvac_percent_candidate(15.0, 12.0, false), 12.0);
+        assert_eq!(resolve_hvac_percent_candidate(15.0, 12.0, true), 15.0);
+        assert_eq!(resolve_hvac_percent_candidate(10.0, 12.0, true), 12.0);
     }
 }

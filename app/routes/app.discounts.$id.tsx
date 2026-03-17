@@ -42,12 +42,14 @@ type ActivationMode =
   | "requires_xyz_state";
 
 type ItemRule = { collection_id: string; percent: number; product_ids: string[] };
+type HvacPercentSelectionMode = "hvac_only_exclusive_best" | "best_of_hvac_and_base";
 type HvacRule = {
   enabled: boolean;
   min_indoor_per_outdoor: number;
   max_indoor_per_outdoor: number;
   percent_off_hvac_products: number;
   amount_off_outdoor_per_bundle: number;
+  percent_selection_mode: HvacPercentSelectionMode;
   indoor_product_ids: string[];
   outdoor_product_ids: string[];
   combination_rules: HvacCombinationRule[];
@@ -166,6 +168,7 @@ const DEFAULT_CONFIG: DiscountConfig = {
     max_indoor_per_outdoor: 6,
     percent_off_hvac_products: 0,
     amount_off_outdoor_per_bundle: 0,
+    percent_selection_mode: "hvac_only_exclusive_best",
     indoor_product_ids: [],
     outdoor_product_ids: [],
     combination_rules: [],
@@ -192,6 +195,10 @@ const normalizeNum = (v: unknown, d: number) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : d;
 };
+const normalizeHvacPercentSelectionMode = (v: unknown): HvacPercentSelectionMode =>
+  String(v ?? "").trim() === "best_of_hvac_and_base"
+    ? "best_of_hvac_and_base"
+    : "hvac_only_exclusive_best";
 const toBool = (v: FormDataEntryValue | null, d = false) =>
   v == null ? d : ["1", "true", "on"].includes(String(v).toLowerCase());
 const toDiscountGid = (raw: string) =>
@@ -817,6 +824,9 @@ function buildRuntimeFunctionConfig(config: DiscountConfig) {
     ),
     percent_off_hvac_products: normalizeNum(config.hvac_rule?.percent_off_hvac_products, 0),
     amount_off_outdoor_per_bundle: normalizeNum(config.hvac_rule?.amount_off_outdoor_per_bundle, 0),
+    percent_selection_mode: normalizeHvacPercentSelectionMode(
+      config.hvac_rule?.percent_selection_mode,
+    ),
     indoor_product_ids: [],
     outdoor_product_ids: [],
     combination_rules: runtimeHvacCombinationRules,
@@ -1379,6 +1389,9 @@ function parseConfig(raw: string | null | undefined): DiscountConfig {
         amount_off_outdoor_per_bundle: normalizeNum(
           merged.hvac_rule.amount_off_outdoor_per_bundle,
           DEFAULT_CONFIG.hvac_rule.amount_off_outdoor_per_bundle,
+        ),
+        percent_selection_mode: normalizeHvacPercentSelectionMode(
+          merged.hvac_rule.percent_selection_mode,
         ),
         combination_rules: Array.isArray(merged.hvac_rule.combination_rules)
           ? merged.hvac_rule.combination_rules
@@ -2239,6 +2252,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         fd.get("hvac_amount_off_outdoor_per_bundle"),
         current.hvac_rule.amount_off_outdoor_per_bundle,
       ),
+      percent_selection_mode: normalizeHvacPercentSelectionMode(
+        fd.get("hvac_percent_selection_mode") ?? current.hvac_rule.percent_selection_mode,
+      ),
       indoor_product_ids: hvacIndoorProductIds,
       outdoor_product_ids: hvacOutdoorProductIds,
       combination_rules: hasHvacComboInputs
@@ -2768,6 +2784,25 @@ export default function DiscountDetailsRoute() {
                 <div style={{ marginTop: 4, fontSize: 13, color: "#475569" }}>
                   Uses mapped products from{" "}
                   <a href="/app/hvac-mapping">HVAC Mapping</a>. Configure discounts per outdoor combination only.
+                </div>
+                <div style={{ marginTop: 10, maxWidth: 560 }}>
+                  <label style={labelStyle}>
+                    Percent behavior after outdoor $ off
+                    <select
+                      style={inputStyle}
+                      name="hvac_percent_selection_mode"
+                      defaultValue={normalizeHvacPercentSelectionMode(
+                        config.hvac_rule.percent_selection_mode,
+                      )}
+                    >
+                      <option value="hvac_only_exclusive_best">
+                        Option 1: Use HVAC percent only (exclusive best)
+                      </option>
+                      <option value="best_of_hvac_and_base">
+                        Option 2: Use best of HVAC percent vs base (VIP/Bulk/First)
+                      </option>
+                    </select>
+                  </label>
                 </div>
                 <div style={{ marginTop: 14, borderTop: "1px solid rgba(17,24,39,0.12)", paddingTop: 12 }}>
                   <div style={{ fontWeight: 700, marginBottom: 6 }}>Specific Combination Rules</div>
