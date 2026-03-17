@@ -128,7 +128,6 @@ struct HvacRuleConfig {
     max_indoor_per_outdoor: f64,
     percent_off_hvac_products: f64,
     amount_off_outdoor_per_bundle: f64,
-    percent_selection_mode: String,
     indoor_product_ids: Vec<String>,
     outdoor_product_ids: Vec<String>,
     combination_rules: Vec<HvacCombinationRuleConfig>,
@@ -157,7 +156,6 @@ impl Default for HvacRuleConfig {
             max_indoor_per_outdoor: 6.0,
             percent_off_hvac_products: 0.0,
             amount_off_outdoor_per_bundle: 0.0,
-            percent_selection_mode: "hvac_only_exclusive_best".to_string(),
             indoor_product_ids: vec![],
             outdoor_product_ids: vec![],
             combination_rules: vec![],
@@ -420,8 +418,6 @@ fn cart_lines_discounts_generate_run(
         .first_order
         .max(discount_percents.bulk)
         .max(discount_percents.vip);
-    let hvac_percent_includes_base =
-        hvac_percent_selection_includes_base(&config.hvac_rule.percent_selection_mode);
 
     let mut candidates: Vec<schema::ProductDiscountCandidate> = vec![];
 
@@ -485,11 +481,7 @@ fn cart_lines_discounts_generate_run(
         }
 
         let base_percent_candidate = order_level_percent.max(item_percent);
-        let hvac_percent_candidate = resolve_hvac_percent_candidate(
-            base_percent_candidate,
-            hvac_percent_exclusive_best,
-            hvac_percent_includes_base,
-        );
+        let hvac_percent_candidate = base_percent_candidate.max(hvac_percent_exclusive_best);
         let current_promo_source = current_promo_attribution(&discount_percents, item_percent);
         if hvac_fixed_exclusive_qty > 0 {
             let hvac_fixed_per_item =
@@ -564,15 +556,10 @@ fn cart_lines_discounts_generate_run(
         let non_hvac_percent_qty = (remaining_qty - hvac_percent_qty).max(0);
         let bundle_percent_contributed =
             hvac_percent_exclusive_best > (base_percent_candidate + 0.0001);
-        let hvac_percent_attribution = if hvac_percent_includes_base {
-            if bundle_percent_contributed && base_percent_candidate > 0.0 {
-                format!("{} + Bundle discount", current_promo_source)
-            } else if bundle_percent_contributed {
-                "Bundle discount".to_string()
-            } else {
-                current_promo_source.clone()
-            }
-        } else if hvac_percent_candidate > 0.0 {
+        let hvac_percent_attribution = if bundle_percent_contributed && base_percent_candidate > 0.0
+        {
+            format!("{} + Bundle discount", current_promo_source)
+        } else if bundle_percent_contributed {
             "Bundle discount".to_string()
         } else {
             current_promo_source.clone()
@@ -937,22 +924,6 @@ fn state_match(state: &str, active: bool) -> bool {
     }
 }
 
-fn hvac_percent_selection_includes_base(mode: &str) -> bool {
-    mode == "best_of_hvac_and_base"
-}
-
-fn resolve_hvac_percent_candidate(
-    base_percent_candidate: f64,
-    hvac_percent_exclusive_best: f64,
-    include_base: bool,
-) -> f64 {
-    if include_base {
-        base_percent_candidate.max(hvac_percent_exclusive_best)
-    } else {
-        hvac_percent_exclusive_best
-    }
-}
-
 fn vip_tag_to_percent(tag: &str) -> Option<f64> {
     if !tag.starts_with("VIP") {
         return None;
@@ -1210,15 +1181,10 @@ mod tests {
     }
 
     #[test]
-    fn hvac_percent_candidate_respects_selection_mode() {
-        assert!(!hvac_percent_selection_includes_base(
-            "hvac_only_exclusive_best"
-        ));
-        assert!(hvac_percent_selection_includes_base(
-            "best_of_hvac_and_base"
-        ));
-        assert_eq!(resolve_hvac_percent_candidate(15.0, 12.0, false), 12.0);
-        assert_eq!(resolve_hvac_percent_candidate(15.0, 12.0, true), 15.0);
-        assert_eq!(resolve_hvac_percent_candidate(10.0, 12.0, true), 12.0);
+    fn hvac_percent_candidate_uses_higher_of_base_or_hvac() {
+        let choose = |base: f64, hvac: f64| base.max(hvac);
+        assert_eq!(choose(15.0, 12.0), 15.0);
+        assert_eq!(choose(10.0, 12.0), 12.0);
+        assert_eq!(choose(0.0, 0.0), 0.0);
     }
 }
