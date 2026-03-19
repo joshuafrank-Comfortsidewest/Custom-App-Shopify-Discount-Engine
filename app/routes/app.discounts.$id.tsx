@@ -208,32 +208,10 @@ const toAppDiscountOwnerGid = (discountType: string, discountId: string) => {
 };
 const deriveRuntimeOwnerIds = (...rawValues: unknown[]) => {
   const out = new Set<string>();
-  const add = (value: unknown) => {
+  rawValues.forEach((value) => {
     const v = String(value ?? "").trim();
-    if (!v) return;
-    out.add(v);
-    const nodeMatch = v.match(/^gid:\/\/shopify\/DiscountAutomaticNode\/(\d+)$/);
-    if (nodeMatch) {
-      const id = nodeMatch[1];
-      out.add(`gid://shopify/DiscountAutomaticApp/${id}`);
-      return;
-    }
-    const automaticAppMatch = v.match(/^gid:\/\/shopify\/DiscountAutomaticApp\/(\d+)$/);
-    if (automaticAppMatch) {
-      out.add(`gid://shopify/DiscountAutomaticNode/${automaticAppMatch[1]}`);
-      return;
-    }
-    const codeAppMatch = v.match(/^gid:\/\/shopify\/DiscountCodeApp\/(\d+)$/);
-    if (codeAppMatch) {
-      out.add(`gid://shopify/DiscountAutomaticNode/${codeAppMatch[1]}`);
-      return;
-    }
-    if (/^\d+$/.test(v)) {
-      out.add(`gid://shopify/DiscountAutomaticNode/${v}`);
-      out.add(`gid://shopify/DiscountAutomaticApp/${v}`);
-    }
-  };
-  rawValues.forEach(add);
+    if (v) out.add(v);
+  });
   return Array.from(out);
 };
 const bulkPercentForSubtotal = (subtotal: number, config: DiscountConfig) => {
@@ -1172,9 +1150,11 @@ async function loadDiscountOwnersAndConfig(admin: any, discountGid: string) {
             __typename
             ... on DiscountAutomaticApp {
               discountId
+              discountClasses
             }
             ... on DiscountCodeApp {
               discountId
+              discountClasses
             }
           }
         }
@@ -1186,6 +1166,9 @@ async function loadDiscountOwnersAndConfig(admin: any, discountGid: string) {
   const nodeId = String(node?.id ?? "").trim();
   const discountType = String(node?.discount?.__typename ?? "").trim();
   const discountId = String(node?.discount?.discountId ?? "").trim();
+  const discountClasses = Array.isArray(node?.discount?.discountClasses)
+    ? node.discount.discountClasses.map((value: any) => String(value ?? "").trim()).filter(Boolean)
+    : [];
   const discountOwnerId = toAppDiscountOwnerGid(discountType, discountId);
   const adminConfigRaw = resolveChunkedConfigJson(node?.adminConfiguration?.value, [
     node?.adminConfigurationPart1?.value,
@@ -1204,7 +1187,7 @@ async function loadDiscountOwnersAndConfig(admin: any, discountGid: string) {
     node?.appMetafield?.value ??
     node?.legacyMetafield?.value ??
     null;
-  return { nodeId, discountOwnerId, discountId, discountType, configRaw };
+  return { nodeId, discountOwnerId, discountId, discountType, discountClasses, configRaw };
 }
 
 async function loadShopConfig(admin: any) {
@@ -2399,7 +2382,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       currentMeta.nodeId ?? "",
     ).trim()} discountType=${String(currentMeta.discountType ?? "").trim()} discountId=${String(
       currentMeta.discountId ?? "",
-    ).trim()} runtimeOwners=${runtimeOwnerIds.join(",")} itemRules=${runtimeItemRuleCount} itemProducts=${runtimeItemProductCount} otherEnabled=${config.collection_spend_rule.enabled} otherProducts=${runtimeOtherProductCount} runtimeBytes=${runtimeBytes} runtimeChunked=${runtimeBytes > FUNCTION_CONFIG_MAX_BYTES}`,
+    ).trim()} discountClasses=${Array.isArray(currentMeta.discountClasses) ? currentMeta.discountClasses.join(",") : ""} runtimeOwners=${runtimeOwnerIds.join(",")} itemRules=${runtimeItemRuleCount} itemProducts=${runtimeItemProductCount} otherEnabled=${config.collection_spend_rule.enabled} otherProducts=${runtimeOtherProductCount} runtimeBytes=${runtimeBytes} runtimeChunked=${runtimeBytes > FUNCTION_CONFIG_MAX_BYTES}`,
   );
   const json = await persistConfig(admin, configOwnerId, config, {
     shopOwnerId: shopMeta.shopId,
