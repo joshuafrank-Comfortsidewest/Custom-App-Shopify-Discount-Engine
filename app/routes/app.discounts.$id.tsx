@@ -206,6 +206,38 @@ const toAppDiscountOwnerGid = (discountType: string, discountId: string) => {
   if (type === "DiscountAutomaticApp") return `gid://shopify/DiscountAutomaticApp/${raw}`;
   return raw;
 };
+const deriveRuntimeOwnerIds = (...rawValues: unknown[]) => {
+  const out = new Set<string>();
+  const add = (value: unknown) => {
+    const v = String(value ?? "").trim();
+    if (!v) return;
+    out.add(v);
+    const nodeMatch = v.match(/^gid:\/\/shopify\/DiscountAutomaticNode\/(\d+)$/);
+    if (nodeMatch) {
+      const id = nodeMatch[1];
+      out.add(`gid://shopify/DiscountAutomaticApp/${id}`);
+      out.add(`gid://shopify/DiscountCodeApp/${id}`);
+      return;
+    }
+    const automaticAppMatch = v.match(/^gid:\/\/shopify\/DiscountAutomaticApp\/(\d+)$/);
+    if (automaticAppMatch) {
+      out.add(`gid://shopify/DiscountAutomaticNode/${automaticAppMatch[1]}`);
+      return;
+    }
+    const codeAppMatch = v.match(/^gid:\/\/shopify\/DiscountCodeApp\/(\d+)$/);
+    if (codeAppMatch) {
+      out.add(`gid://shopify/DiscountAutomaticNode/${codeAppMatch[1]}`);
+      return;
+    }
+    if (/^\d+$/.test(v)) {
+      out.add(`gid://shopify/DiscountAutomaticNode/${v}`);
+      out.add(`gid://shopify/DiscountAutomaticApp/${v}`);
+      out.add(`gid://shopify/DiscountCodeApp/${v}`);
+    }
+  };
+  rawValues.forEach(add);
+  return Array.from(out);
+};
 const bulkPercentForSubtotal = (subtotal: number, config: DiscountConfig) => {
   if (subtotal >= config.bulk15_min) return config.bulk15_percent;
   if (subtotal >= config.bulk13_min) return config.bulk13_percent;
@@ -2358,26 +2390,18 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         "Other Discounts selected collection resolved 0 products. Verify the collection contains products and app product access is active.",
     });
   }
+  const runtimeOwnerIds = deriveRuntimeOwnerIds(
+    currentMeta.discountOwnerId,
+    currentMeta.discountId,
+    currentMeta.nodeId,
+    configOwnerId,
+  );
   console.info(
     `[discount-save-runtime] owner=${configOwnerId} nodeId=${String(
       currentMeta.nodeId ?? "",
     ).trim()} discountType=${String(currentMeta.discountType ?? "").trim()} discountId=${String(
       currentMeta.discountId ?? "",
-    ).trim()} runtimeOwners=${Array.from(
-      new Set(
-        [currentMeta.discountOwnerId, currentMeta.discountId, configOwnerId]
-          .map((value) => String(value ?? "").trim())
-          .filter(Boolean),
-      ),
-    ).join(",")} itemRules=${runtimeItemRuleCount} itemProducts=${runtimeItemProductCount} otherEnabled=${config.collection_spend_rule.enabled} otherProducts=${runtimeOtherProductCount} runtimeBytes=${runtimeBytes} runtimeChunked=${runtimeBytes > FUNCTION_CONFIG_MAX_BYTES}`,
-  );
-
-  const runtimeOwnerIds = Array.from(
-    new Set(
-      [currentMeta.discountOwnerId, currentMeta.discountId, configOwnerId]
-        .map((value) => String(value ?? "").trim())
-        .filter(Boolean),
-    ),
+    ).trim()} runtimeOwners=${runtimeOwnerIds.join(",")} itemRules=${runtimeItemRuleCount} itemProducts=${runtimeItemProductCount} otherEnabled=${config.collection_spend_rule.enabled} otherProducts=${runtimeOtherProductCount} runtimeBytes=${runtimeBytes} runtimeChunked=${runtimeBytes > FUNCTION_CONFIG_MAX_BYTES}`,
   );
   const json = await persistConfig(admin, configOwnerId, config, {
     shopOwnerId: shopMeta.shopId,
