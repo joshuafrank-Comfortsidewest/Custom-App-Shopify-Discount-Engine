@@ -216,7 +216,6 @@ const deriveRuntimeOwnerIds = (...rawValues: unknown[]) => {
     if (nodeMatch) {
       const id = nodeMatch[1];
       out.add(`gid://shopify/DiscountAutomaticApp/${id}`);
-      out.add(`gid://shopify/DiscountCodeApp/${id}`);
       return;
     }
     const automaticAppMatch = v.match(/^gid:\/\/shopify\/DiscountAutomaticApp\/(\d+)$/);
@@ -232,7 +231,6 @@ const deriveRuntimeOwnerIds = (...rawValues: unknown[]) => {
     if (/^\d+$/.test(v)) {
       out.add(`gid://shopify/DiscountAutomaticNode/${v}`);
       out.add(`gid://shopify/DiscountAutomaticApp/${v}`);
-      out.add(`gid://shopify/DiscountCodeApp/${v}`);
     }
   };
   rawValues.forEach(add);
