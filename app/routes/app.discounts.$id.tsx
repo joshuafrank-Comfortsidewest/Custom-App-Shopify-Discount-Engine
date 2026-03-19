@@ -665,11 +665,11 @@ async function tagsRemove(admin: any, productId: string, tags: string[]): Promis
 }
 
 const FUNCTION_CONFIG_MAX_BYTES = 10_000;
-const FUNCTION_CONFIG_CHUNK_MAX_BYTES = 50_000;
+const FUNCTION_CONFIG_CHUNK_MAX_BYTES = 20_000;
 const FUNCTION_CONFIG_KEY = "function-configuration";
 const ADMIN_CONFIG_KEY = "admin-configuration";
 const FUNCTION_CONFIG_CHUNK_KEY_PREFIX = "function-configuration-part-";
-const FUNCTION_CONFIG_MAX_CHUNKS = 2;
+const FUNCTION_CONFIG_MAX_CHUNKS = 4;
 const ADMIN_CONFIG_CHUNK_KEY_PREFIX = "admin-configuration-part-";
 const ADMIN_CONFIG_MAX_CHUNKS = 8;
 const SHOP_RUNTIME_MIRROR_NAMESPACE = "smart_discount_engine";

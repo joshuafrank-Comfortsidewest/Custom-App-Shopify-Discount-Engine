@@ -281,6 +281,14 @@ fn cart_lines_discounts_generate_run(
             .app_function_config_part_2_metafield()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
+        discount
+            .app_function_config_part_3_metafield()
+            .map(|metafield| metafield.value())
+            .map(|value| value.as_str()),
+        discount
+            .app_function_config_part_4_metafield()
+            .map(|metafield| metafield.value())
+            .map(|value| value.as_str()),
     ];
     let metafield_json = resolve_runtime_config_json(
         app_function_config_metafield_json,
