@@ -14,6 +14,7 @@ struct DiscountPercents {
 
 #[derive(Clone)]
 struct HvacActiveRule {
+    name: String,
     stack_mode: String,
     percent_off: f64,
     amount_off_outdoor_per_bundle: f64,
@@ -289,11 +290,22 @@ fn cart_lines_discounts_generate_run(
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
     ];
-    let discount_metafield_json = resolve_runtime_config_json(
+    let metafield_json = resolve_runtime_config_json(
         app_function_config_metafield_json,
         &app_function_config_chunk_values,
     );
-    let config = runtime_config(discount_metafield_json.as_deref());
+    let use_tag_item_fallback = metafield_json.is_none();
+
+    let config = runtime_config(metafield_json.as_deref());
+
+    let has_product_discount_class = input
+        .discount()
+        .discount_classes()
+        .contains(&schema::DiscountClass::Product);
+
+    if !has_product_discount_class {
+        return Ok(schema::CartLinesDiscountsGenerateRunResult { operations: vec![] });
+    }
 
     let entered_codes: Vec<String> = input
         .entered_discount_codes()
@@ -366,15 +378,14 @@ fn cart_lines_discounts_generate_run(
         .iter()
         .map(|product_id| normalize_product_id(product_id))
         .collect();
-
     let requested_other_units = collection_spend_discountable_units(
+        &input,
         &config,
         &collection_spend_products,
         &entered_codes,
         bulk_active,
         vip_active,
         first_active,
-        &input,
     );
     // Apply one fixed-unit discount per spend step (e.g. $3000 => 2 units),
     // prioritizing highest-priced eligible units first.
@@ -434,12 +445,14 @@ fn cart_lines_discounts_generate_run(
             if let Some(percent) = product_item_percents.get(&normalized_pid) {
                 item_percent = item_percent.max(*percent);
             }
-            for tag_match in variant.product().has_tags().iter() {
-                if !*tag_match.has_tag() {
-                    continue;
-                }
-                if let Some(percent) = item_off_tag_to_percent(tag_match.tag()) {
-                    item_percent = item_percent.max(percent);
+            if use_tag_item_fallback {
+                for tag_match in variant.product().has_tags().iter() {
+                    if !*tag_match.has_tag() {
+                        continue;
+                    }
+                    if let Some(percent) = item_off_tag_to_percent(tag_match.tag()) {
+                        item_percent = item_percent.max(percent);
+                    }
                 }
             }
             for rule in hvac_active_rules.iter() {
@@ -635,13 +648,13 @@ fn cart_lines_discounts_generate_run(
 }
 
 fn collection_spend_discountable_units(
+    input: &schema::cart_lines_discounts_generate_run::Input,
     config: &RuntimeConfig,
     product_set: &HashSet<String>,
     entered_codes: &[String],
     bulk_active: bool,
     vip_active: bool,
     first_active: bool,
-    input: &schema::cart_lines_discounts_generate_run::Input,
 ) -> i32 {
     // Only require the dedicated rule toggle; do not depend on top UI toggle.
     if !config.collection_spend_rule.enabled {
@@ -809,6 +822,7 @@ fn active_hvac_rules(
         let percent_subtotal = selected_outdoor_subtotal + selected_indoor_subtotal;
         let est = (percent_subtotal * (percent / 100.0)) + ((fixed_units as f64) * amount);
         candidate_rules.push(HvacActiveRule {
+            name: rule.name.clone(),
             stack_mode: rule.stack_mode.clone(),
             percent_off: percent,
             amount_off_outdoor_per_bundle: amount,
@@ -923,11 +937,17 @@ fn vip_tag_to_percent(tag: &str) -> Option<f64> {
 }
 
 fn item_off_tag_to_percent(tag: &str) -> Option<f64> {
-    let normalized = tag.trim().to_ascii_lowercase();
-    let numeric = normalized.strip_suffix(" off")?.trim();
-    let percent = numeric.parse::<f64>().ok()?;
-    if percent > 0.0 && percent <= 99.0 {
-        Some(percent)
+    let normalized = tag.trim().to_lowercase();
+    if !normalized.ends_with(" off") {
+        return None;
+    }
+    let value = normalized
+        .trim_end_matches(" off")
+        .trim()
+        .parse::<f64>()
+        .ok()?;
+    if (0.0..=100.0).contains(&value) {
+        Some(value)
     } else {
         None
     }

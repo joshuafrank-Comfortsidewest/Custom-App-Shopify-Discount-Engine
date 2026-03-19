@@ -196,14 +196,6 @@ const toBool = (v: FormDataEntryValue | null, d = false) =>
   v == null ? d : ["1", "true", "on"].includes(String(v).toLowerCase());
 const toDiscountGid = (raw: string) =>
   raw.startsWith("gid://") ? raw : `gid://shopify/DiscountAutomaticNode/${raw}`;
-const deriveRuntimeOwnerIds = (...rawValues: unknown[]) => {
-  const out = new Set<string>();
-  rawValues.forEach((value) => {
-    const v = String(value ?? "").trim();
-    if (v) out.add(v);
-  });
-  return Array.from(out);
-};
 const bulkPercentForSubtotal = (subtotal: number, config: DiscountConfig) => {
   if (subtotal >= config.bulk15_min) return config.bulk15_percent;
   if (subtotal >= config.bulk13_min) return config.bulk13_percent;
@@ -316,25 +308,7 @@ const parseRequestedSkuTokens = (raw: unknown) =>
     .split(/[\n,; ]+/)
     .map((v) => normalizeSkuPart(v))
     .filter(Boolean);
-const OFF_TAG_REGEX = /^(\d+(?:\.\d+)?)\s*off$/i;
-const isNumericOffTag = (tag: string) => OFF_TAG_REGEX.test(String(tag ?? "").trim());
-const formatPercentForTag = (value: number) => {
-  if (!Number.isFinite(value)) return "";
-  const fixed = value.toFixed(2);
-  return fixed.replace(/\.?0+$/, "");
-};
-const offTagCandidatesForPercent = (value: number) => {
-  if (!Number.isFinite(value) || value <= 0) return [];
-  const normalized = Number(value.toFixed(2));
-  const raw = String(value).trim();
-  const fixedTwo = normalized.toFixed(2);
-  const trimmed = formatPercentForTag(normalized);
-  const oneDecimal = normalized.toFixed(1).replace(/\.0$/, "");
-  const forms = Array.from(
-    new Set([raw, fixedTwo, oneDecimal, trimmed].map((v) => v.trim()).filter(Boolean)),
-  );
-  return forms.map((n) => `${n} off`);
-};
+const isNumericOffTag = (tag: string) => /^\d+\s*off$/i.test(String(tag ?? "").trim());
 const randomId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 const AUTO_TAG_JOB_BATCH_SIZE = 20;
 const AUTO_TAG_JOB_MAX_HISTORY_CHANGES = 250;
@@ -683,7 +657,6 @@ async function tagsRemove(admin: any, productId: string, tags: string[]): Promis
 }
 
 const FUNCTION_CONFIG_MAX_BYTES = 10_000;
-const FUNCTION_CONFIG_CHUNK_MAX_BYTES = 20_000;
 const FUNCTION_CONFIG_KEY = "function-configuration";
 const ADMIN_CONFIG_KEY = "admin-configuration";
 const FUNCTION_CONFIG_CHUNK_KEY_PREFIX = "function-configuration-part-";
@@ -916,7 +889,7 @@ async function persistConfig(
   admin: any,
   ownerId: string,
   config: DiscountConfig,
-  options?: { skipRuntime?: boolean; shopOwnerId?: string; runtimeOwnerIds?: string[] },
+  options?: { skipRuntime?: boolean; shopOwnerId?: string },
 ) {
   const payload = JSON.stringify(buildAdminConfiguration(config));
   const skipRuntime = Boolean(options?.skipRuntime);
@@ -925,16 +898,6 @@ async function persistConfig(
     ? ""
     : JSON.stringify(buildRuntimeFunctionConfig(config));
   const cleanedOwnerId = String(ownerId ?? "").trim();
-  const runtimeOwnerIds = Array.from(
-    new Set(
-      (options?.runtimeOwnerIds ?? [])
-        .map((value) => String(value ?? "").trim())
-        .filter(Boolean),
-    ),
-  );
-  if (runtimeOwnerIds.length === 0 && cleanedOwnerId) {
-    runtimeOwnerIds.push(cleanedOwnerId);
-  }
   if (!cleanedOwnerId) {
     return {
       data: {
@@ -977,7 +940,7 @@ async function persistConfig(
       value: payload,
     });
   } else {
-    const chunks = splitUtf8ByBytes(payload, FUNCTION_CONFIG_CHUNK_MAX_BYTES);
+    const chunks = splitUtf8ByBytes(payload, FUNCTION_CONFIG_MAX_BYTES);
     if (chunks.length > ADMIN_CONFIG_MAX_CHUNKS) {
       adminWarning = `Admin settings are too large (${adminBytes} bytes). Reduce Auto Tagging history or number of very large rules, then save again.`;
     } else {
@@ -1003,38 +966,35 @@ async function persistConfig(
     const runtimeBytes = Buffer.byteLength(runtimePayload, "utf8");
 
     if (runtimeBytes <= FUNCTION_CONFIG_MAX_BYTES) {
-      for (const runtimeOwnerId of runtimeOwnerIds) {
-        runtimeMetafields.push({
-          ownerId: runtimeOwnerId,
-          namespace: "$app",
-          key: FUNCTION_CONFIG_KEY,
-          type: "json",
-          value: runtimePayload,
-        });
-      }
+      runtimeMetafields.push({
+        ownerId: cleanedOwnerId,
+        namespace: "$app",
+        key: FUNCTION_CONFIG_KEY,
+        type: "json",
+        value: runtimePayload,
+      });
     } else {
-      const chunks = splitUtf8ByBytes(runtimePayload, FUNCTION_CONFIG_CHUNK_MAX_BYTES);
+      const chunks = splitUtf8ByBytes(runtimePayload, FUNCTION_CONFIG_MAX_BYTES);
       if (chunks.length > FUNCTION_CONFIG_MAX_CHUNKS) {
         runtimeWarning = `Runtime function config is too large (${runtimeBytes} bytes). Settings were saved, but checkout runtime was not updated. Reduce selected item/HVAC products or use fewer large collection rules, then save again.`;
       } else {
-        for (const runtimeOwnerId of runtimeOwnerIds) {
+        runtimeMetafields.push({
+          ownerId: cleanedOwnerId,
+          namespace: "$app",
+          key: FUNCTION_CONFIG_KEY,
+          type: "json",
+          value: JSON.stringify({ chunked: true, parts: chunks.length }),
+        });
+
+        chunks.forEach((chunk, idx) => {
           runtimeMetafields.push({
-            ownerId: runtimeOwnerId,
+            ownerId: cleanedOwnerId,
             namespace: "$app",
-            key: FUNCTION_CONFIG_KEY,
-            type: "json",
-            value: JSON.stringify({ chunked: true, parts: chunks.length }),
+            key: `${FUNCTION_CONFIG_CHUNK_KEY_PREFIX}${idx + 1}`,
+            type: "multi_line_text_field",
+            value: chunk,
           });
-          chunks.forEach((chunk, idx) => {
-            runtimeMetafields.push({
-              ownerId: runtimeOwnerId,
-              namespace: "$app",
-              key: `${FUNCTION_CONFIG_CHUNK_KEY_PREFIX}${idx + 1}`,
-              type: "multi_line_text_field",
-              value: chunk,
-            });
-          });
-        }
+        });
       }
     }
     if (runtimeMetafields.length > 0 && cleanedShopOwnerId) {
@@ -1064,21 +1024,14 @@ async function persistConfig(
     type: string;
     value: string;
   }>) => {
-    try {
-      const response = await admin.graphql(
-        `#graphql
-        mutation m($metafields: [MetafieldsSetInput!]!) {
-          metafieldsSet(metafields: $metafields) { userErrors { field message } }
-        }`,
-        { variables: { metafields } },
-      );
-      return response.json();
-    } catch (error) {
-      return {
-        data: { metafieldsSet: { userErrors: [] } },
-        errors: [{ message: String((error as Error)?.message ?? error ?? "GraphQL error") }],
-      };
-    }
+    const response = await admin.graphql(
+      `#graphql
+      mutation m($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) { userErrors { field message } }
+      }`,
+      { variables: { metafields } },
+    );
+    return response.json();
   };
 
   const userErrors: Array<{ field: string[]; message: string }> = [];
@@ -1165,11 +1118,9 @@ async function loadDiscountOwnersAndConfig(admin: any, discountGid: string) {
             __typename
             ... on DiscountAutomaticApp {
               discountId
-              discountClasses
             }
             ... on DiscountCodeApp {
               discountId
-              discountClasses
             }
           }
         }
@@ -1181,10 +1132,6 @@ async function loadDiscountOwnersAndConfig(admin: any, discountGid: string) {
   const nodeId = String(node?.id ?? "").trim();
   const discountType = String(node?.discount?.__typename ?? "").trim();
   const discountId = String(node?.discount?.discountId ?? "").trim();
-  const discountClasses = Array.isArray(node?.discount?.discountClasses)
-    ? node.discount.discountClasses.map((value: any) => String(value ?? "").trim()).filter(Boolean)
-    : [];
-  const discountOwnerId = discountId;
   const adminConfigRaw = resolveChunkedConfigJson(node?.adminConfiguration?.value, [
     node?.adminConfigurationPart1?.value,
     node?.adminConfigurationPart2?.value,
@@ -1202,7 +1149,7 @@ async function loadDiscountOwnersAndConfig(admin: any, discountGid: string) {
     node?.appMetafield?.value ??
     node?.legacyMetafield?.value ??
     null;
-  return { nodeId, discountOwnerId, discountId, discountType, discountClasses, configRaw };
+  return { nodeId, discountId, discountType, configRaw };
 }
 
 async function loadShopConfig(admin: any) {
@@ -1282,34 +1229,6 @@ async function fetchCollectionProductIds(admin: any, collectionId: string): Prom
     for (const n of block.nodes ?? []) if (n?.id) ids.push(String(n.id));
     if (!block.pageInfo?.hasNextPage) break;
     after = block.pageInfo.endCursor ?? null;
-  }
-  return ids;
-}
-
-async function fetchProductIdsByTag(admin: any, tag: string): Promise<string[]> {
-  const cleanTag = String(tag ?? "").trim();
-  if (!cleanTag) return [];
-  const ids: string[] = [];
-  let after: string | null = null;
-  const query = `tag:'${cleanTag.replace(/'/g, "\\'")}'`;
-  while (true) {
-    const response: any = await admin.graphql(
-      `#graphql
-      query productsByTag($after: String, $query: String!) {
-        products(first: 250, after: $after, query: $query) {
-          nodes { id }
-          pageInfo { hasNextPage endCursor }
-        }
-      }`,
-      { variables: { after, query } },
-    );
-    const json: any = await response.json();
-    const block: any = json?.data?.products;
-    if (!block) break;
-    for (const n of block.nodes ?? []) if (n?.id) ids.push(String(n.id));
-    if (!block.pageInfo?.hasNextPage) break;
-    after = block.pageInfo.endCursor ?? null;
-    if (!after) break;
   }
   return ids;
 }
@@ -1624,43 +1543,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   ]);
   const configOwnerId = String(currentMeta.nodeId || discountGid || "").trim();
   const current = parseConfig(currentMeta.configRaw ?? shopMeta.configRaw);
-  const collectionProductIdsCache = new Map<string, string[]>();
-  const getCollectionProductIdsCached = async (collectionId: string) => {
-    const id = String(collectionId ?? "").trim();
-    if (!id) return [];
-    if (collectionProductIdsCache.has(id)) {
-      return collectionProductIdsCache.get(id) ?? [];
-    }
-    const ids = await fetchCollectionProductIds(admin, id);
-    collectionProductIdsCache.set(id, ids);
-    return ids;
-  };
-  const tagProductIdsCache = new Map<string, string[]>();
-  const getTagProductIdsCached = async (tag: string) => {
-    const key = String(tag ?? "").trim().toLowerCase();
-    if (!key) return [];
-    if (tagProductIdsCache.has(key)) {
-      return tagProductIdsCache.get(key) ?? [];
-    }
-    const ids = await fetchProductIdsByTag(admin, tag);
-    tagProductIdsCache.set(key, ids);
-    return ids;
-  };
-  const getItemRuleProductIds = async (collectionId: string, percent: number) => {
-    const collectionIds = await getCollectionProductIdsCached(collectionId);
-    const tagCandidates = offTagCandidatesForPercent(percent);
-    if (tagCandidates.length === 0) {
-      return Array.from(new Set(collectionIds));
-    }
-    const taggedGroups = await Promise.all(tagCandidates.map((tag) => getTagProductIdsCached(tag)));
-    const merged = new Set(collectionIds);
-    for (const group of taggedGroups) {
-      for (const productId of group) {
-        if (productId) merged.add(productId);
-      }
-    }
-    return Array.from(merged);
-  };
 
   if (intent === "auto_tag_apply") {
     const mode = String(fd.get("auto_tag_mode") ?? "tag") === "untag_discount" ? "untag_discount" : "tag";
@@ -1914,7 +1796,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           .map(async (r) => ({
             collection_id: r.collection_id,
             percent: r.percent,
-            product_ids: await getItemRuleProductIds(r.collection_id, r.percent),
+            product_ids: await fetchCollectionProductIds(admin, r.collection_id),
           })),
       )
     : hasItemInputs
@@ -1928,7 +1810,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           return Promise.all(
             rules.map(async (r) => ({
               ...r,
-              product_ids: await getItemRuleProductIds(r.collection_id, r.percent),
+              product_ids: await fetchCollectionProductIds(admin, r.collection_id),
             })),
           );
         })()
@@ -1940,7 +1822,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     ? String(fd.get("collection_spend_collection_id") ?? "").trim()
     : current.collection_spend_rule.collection_id;
   const csProductIds = csCollectionId
-    ? await getCollectionProductIdsCached(csCollectionId)
+    ? await fetchCollectionProductIds(admin, csCollectionId)
     : [];
   const mappedRows = await prisma.hvacSkuMapping.findMany({
     where: { shop: session.shop, mappedProductId: { not: null } },
@@ -2194,13 +2076,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     const brandRefrigerantFilteredSourceSkus = constrainedIndoorSourceSkus.filter((sku) => {
       const indoorBrand = String(indoorBrandBySku.get(sku) ?? "").trim();
       const indoorRefrigerant = String(indoorRefrigerantBySku.get(sku) ?? "").trim();
-      // Don't drop valid mappings when metadata is incomplete; only enforce exact match
-      // when both sides have a value.
-      const brandOk =
-        !ruleBrand || !indoorBrand || norm(indoorBrand) === norm(ruleBrand);
+      const brandOk = Boolean(ruleBrand) && Boolean(indoorBrand) && norm(indoorBrand) === norm(ruleBrand);
       const refrigerantOk =
-        !ruleRefrigerant ||
-        !indoorRefrigerant ||
+        Boolean(ruleRefrigerant) &&
+        Boolean(indoorRefrigerant) &&
         norm(indoorRefrigerant) === norm(ruleRefrigerant);
       return brandOk && refrigerantOk;
     });
@@ -2400,80 +2279,12 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   config.hvac_rule.enabled =
     topHvacEnabled || hvacCombinationRules.some((r) => Boolean(r?.enabled));
 
-  const runtimePreview = buildRuntimeFunctionConfig(config);
-  const runtimeItemRuleCount = runtimePreview.item_collection_rules.length;
-  const runtimeItemProductCount = runtimePreview.item_collection_rules.reduce(
-    (sum, rule) => sum + (Array.isArray(rule.product_ids) ? rule.product_ids.length : 0),
-    0,
-  );
-  const runtimeOtherProductCount = Array.isArray(runtimePreview.collection_spend_rule?.product_ids)
-    ? runtimePreview.collection_spend_rule.product_ids.length
-    : 0;
-  const runtimeBytes = Buffer.byteLength(JSON.stringify(runtimePreview), "utf8");
-  const zeroResolvedItemRules = (config.item_collection_rules ?? []).filter(
-    (rule) =>
-      String(rule?.collection_id ?? "").trim() &&
-      Number(rule?.percent ?? 0) > 0 &&
-      (!Array.isArray(rule?.product_ids) || rule.product_ids.length === 0),
-  );
-  const resolutionWarnings: Array<{ field: string[]; message: string }> = [];
-  if (
-    config.toggles.item_collection_enabled &&
-    zeroResolvedItemRules.length > 0
-  ) {
-    const zeroResolvedCollectionIds = zeroResolvedItemRules
-      .map((rule) => String(rule?.collection_id ?? "").trim())
-      .filter(Boolean);
-    const sample = zeroResolvedCollectionIds.slice(0, 3).join(", ");
-    resolutionWarnings.push({
-      field: ["item_collection_rules"],
-      message: `Item Rules resolved 0 products for ${zeroResolvedItemRules.length} selected collection(s)${
-        sample ? ` (${sample}${zeroResolvedCollectionIds.length > 3 ? ", ..." : ""})` : ""
-      }. Verify those collections contain products and the app has product read access.`,
-    });
-  }
-  if (
-    config.collection_spend_rule.enabled &&
-    String(config.collection_spend_rule.collection_id ?? "").trim() &&
-    runtimeOtherProductCount === 0
-  ) {
-    resolutionWarnings.push({
-      field: ["collection_spend_rule", "collection_id"],
-      message:
-        "Other Discounts selected collection resolved 0 products. Verify the collection contains products and app product access is active.",
-    });
-  }
-  const runtimeOwnerIds = deriveRuntimeOwnerIds(
-    currentMeta.discountOwnerId,
-    currentMeta.discountId,
-    currentMeta.nodeId,
-    configOwnerId,
-  );
-  console.info(
-    `[discount-save-runtime] owner=${configOwnerId} nodeId=${String(
-      currentMeta.nodeId ?? "",
-    ).trim()} discountType=${String(currentMeta.discountType ?? "").trim()} discountId=${String(
-      currentMeta.discountId ?? "",
-    ).trim()} discountClasses=${Array.isArray(currentMeta.discountClasses) ? currentMeta.discountClasses.join(",") : ""} runtimeOwners=${runtimeOwnerIds.join(",")} itemRules=${runtimeItemRuleCount} itemProducts=${runtimeItemProductCount} otherEnabled=${config.collection_spend_rule.enabled} otherProducts=${runtimeOtherProductCount} runtimeBytes=${runtimeBytes} runtimeChunked=${runtimeBytes > FUNCTION_CONFIG_MAX_BYTES}`,
-  );
   const json = await persistConfig(admin, configOwnerId, config, {
     shopOwnerId: shopMeta.shopId,
-    runtimeOwnerIds,
   });
-  const allErrors = [
-    ...(json?.data?.metafieldsSet?.userErrors ?? []),
-    ...resolutionWarnings,
-  ];
-  if (allErrors.length > 0) {
-    console.warn(
-      `[discount-save-runtime-warning] ${allErrors
-        .map((e) => String(e?.message ?? "Unknown error"))
-        .join(" | ")}`,
-    );
-  }
   return {
-    ok: allErrors.length === 0,
-    errors: allErrors,
+    ok: (json?.data?.metafieldsSet?.userErrors ?? []).length === 0,
+    errors: json?.data?.metafieldsSet?.userErrors ?? [],
     conflicts: detectConflicts(config),
   };
 };
