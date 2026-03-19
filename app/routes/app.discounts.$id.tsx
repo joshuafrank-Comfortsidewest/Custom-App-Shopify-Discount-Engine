@@ -657,7 +657,7 @@ async function tagsRemove(admin: any, productId: string, tags: string[]): Promis
 }
 
 const FUNCTION_CONFIG_MAX_BYTES = 10_000;
-const FUNCTION_CONFIG_CHUNK_MAX_BYTES = 20_000;
+const FUNCTION_CONFIG_CHUNK_MAX_BYTES = 50_000;
 const FUNCTION_CONFIG_KEY = "function-configuration";
 const ADMIN_CONFIG_KEY = "admin-configuration";
 const FUNCTION_CONFIG_CHUNK_KEY_PREFIX = "function-configuration-part-";
@@ -667,10 +667,6 @@ const ADMIN_CONFIG_MAX_CHUNKS = 8;
 const SHOP_RUNTIME_MIRROR_NAMESPACE = "smart_discount_engine";
 const SHOP_RUNTIME_MIRROR_KEY = "config";
 const SHOP_RUNTIME_APP_MIRROR_NAMESPACE = "$app:smart_discount_engine";
-const PRODUCT_RUNTIME_METAFIELD_NAMESPACE = "smart_discount_engine";
-const PRODUCT_ITEM_OFF_PERCENT_METAFIELD_KEY = "item_off_percent";
-const PRODUCT_OTHER_ELIGIBLE_METAFIELD_KEY = "other_eligible";
-const PRODUCT_METAFIELDS_SET_BATCH_SIZE = 25;
 
 function splitUtf8ByBytes(input: string, maxBytes: number): string[] {
   if (maxBytes <= 0) return [input];
@@ -734,14 +730,6 @@ function compactProductIds(values: unknown): string[] {
   return Array.from(new Set(out));
 }
 
-function toProductGid(value: unknown): string {
-  const raw = String(value ?? "").trim();
-  if (!raw) return "";
-  if (raw.startsWith("gid://shopify/Product/")) return raw;
-  if (/^\d+$/.test(raw)) return `gid://shopify/Product/${raw}`;
-  return raw;
-}
-
 function buildRuntimeFunctionConfig(config: DiscountConfig) {
   const itemRulesEnabled = Boolean(config.toggles?.item_collection_enabled);
   const otherRuleEnabled = Boolean(config.toggles?.collection_spend_enabled || config.collection_spend_rule?.enabled);
@@ -752,10 +740,9 @@ function buildRuntimeFunctionConfig(config: DiscountConfig) {
         .map((rule) => ({
           collection_id: String(rule?.collection_id ?? "").trim(),
           percent: normalizeNum(rule?.percent, 0),
-          // Item eligibility is read from per-product metafields at runtime.
-          product_ids: [],
+          product_ids: compactProductIds(rule?.product_ids),
         }))
-        .filter((rule) => rule.collection_id && rule.percent > 0)
+        .filter((rule) => rule.collection_id && rule.percent > 0 && rule.product_ids.length > 0)
     : [];
 
   const runtimeCollectionSpendRule = otherRuleEnabled
@@ -781,8 +768,7 @@ function buildRuntimeFunctionConfig(config: DiscountConfig) {
             DEFAULT_CONFIG.collection_spend_rule.max_discounted_units_per_order,
           ),
         ),
-        // Collection-spend eligibility is read from per-product metafields at runtime.
-        product_ids: [],
+        product_ids: compactProductIds(config.collection_spend_rule?.product_ids),
         activation: {
           ...DEFAULT_CONFIG.collection_spend_rule.activation,
           ...(config.collection_spend_rule?.activation ?? {}),
@@ -1246,175 +1232,6 @@ async function fetchCollectionProductIds(admin: any, collectionId: string): Prom
     after = block.pageInfo.endCursor ?? null;
   }
   return ids;
-}
-
-function buildItemPercentByProduct(
-  config: DiscountConfig,
-  collectionProductsById: Map<string, string[]>,
-): Map<string, number> {
-  const byProduct = new Map<string, number>();
-  if (!config.toggles?.item_collection_enabled) return byProduct;
-  for (const rule of config.item_collection_rules ?? []) {
-    const collectionId = String(rule?.collection_id ?? "").trim();
-    if (!collectionId) continue;
-    const percent = Number(rule?.percent ?? 0);
-    if (!Number.isFinite(percent) || percent <= 0) continue;
-    for (const productId of collectionProductsById.get(collectionId) ?? []) {
-      const normalizedId = compactProductId(productId);
-      if (!normalizedId) continue;
-      byProduct.set(normalizedId, Math.max(byProduct.get(normalizedId) ?? 0, percent));
-    }
-  }
-  return byProduct;
-}
-
-function buildOtherEligibleProductSet(
-  config: DiscountConfig,
-  collectionProductsById: Map<string, string[]>,
-): Set<string> {
-  const out = new Set<string>();
-  const isEnabled = Boolean(config.collection_spend_rule?.enabled || config.toggles?.collection_spend_enabled);
-  if (!isEnabled) return out;
-  const collectionId = String(config.collection_spend_rule?.collection_id ?? "").trim();
-  if (!collectionId) return out;
-  for (const productId of collectionProductsById.get(collectionId) ?? []) {
-    const normalizedId = compactProductId(productId);
-    if (normalizedId) out.add(normalizedId);
-  }
-  return out;
-}
-
-function addRuleCollectionIds(config: DiscountConfig, out: Set<string>) {
-  for (const rule of config.item_collection_rules ?? []) {
-    const collectionId = String(rule?.collection_id ?? "").trim();
-    if (collectionId) out.add(collectionId);
-  }
-  const collectionSpendCollectionId = String(config.collection_spend_rule?.collection_id ?? "").trim();
-  if (collectionSpendCollectionId) out.add(collectionSpendCollectionId);
-}
-
-function addRuleProductIds(config: DiscountConfig, out: Set<string>) {
-  for (const rule of config.item_collection_rules ?? []) {
-    for (const productId of rule?.product_ids ?? []) {
-      const gid = toProductGid(productId);
-      if (gid) out.add(gid);
-    }
-  }
-  for (const productId of config.collection_spend_rule?.product_ids ?? []) {
-    const gid = toProductGid(productId);
-    if (gid) out.add(gid);
-  }
-}
-
-async function syncRuntimeProductMetafields(
-  admin: any,
-  previousConfig: DiscountConfig,
-  nextConfig: DiscountConfig,
-  getCollectionProductIds: (collectionId: string) => Promise<string[]>,
-): Promise<Array<{ field: string[]; message: string }>> {
-  const userErrors: Array<{ field: string[]; message: string }> = [];
-  const relevantCollectionIds = new Set<string>();
-  addRuleCollectionIds(previousConfig, relevantCollectionIds);
-  addRuleCollectionIds(nextConfig, relevantCollectionIds);
-
-  const collectionProductsById = new Map<string, string[]>();
-  for (const collectionId of relevantCollectionIds) {
-    try {
-      collectionProductsById.set(collectionId, await getCollectionProductIds(collectionId));
-    } catch (error) {
-      userErrors.push({
-        field: ["productRuntimeMetafields", "collectionLookup"],
-        message: `Failed to load products for collection ${collectionId}: ${String(
-          (error as Error)?.message ?? error,
-        )}`,
-      });
-      collectionProductsById.set(collectionId, []);
-    }
-  }
-
-  const nextItemPercentByProduct = buildItemPercentByProduct(nextConfig, collectionProductsById);
-  const nextOtherEligible = buildOtherEligibleProductSet(nextConfig, collectionProductsById);
-
-  const impactedProductIds = new Set<string>();
-  for (const productIds of collectionProductsById.values()) {
-    for (const productId of productIds) {
-      const gid = toProductGid(productId);
-      if (gid) impactedProductIds.add(gid);
-    }
-  }
-  addRuleProductIds(previousConfig, impactedProductIds);
-  addRuleProductIds(nextConfig, impactedProductIds);
-  if (impactedProductIds.size === 0) return userErrors;
-
-  const metafieldsInputs: Array<{
-    ownerId: string;
-    namespace: string;
-    key: string;
-    type: string;
-    value: string;
-  }> = [];
-
-  for (const productGid of impactedProductIds) {
-    const normalizedId = compactProductId(productGid);
-    if (!normalizedId) continue;
-
-    const nextItemPercent = Math.max(0, nextItemPercentByProduct.get(normalizedId) ?? 0);
-    const nextOther = nextOtherEligible.has(normalizedId);
-
-    metafieldsInputs.push(
-      {
-        ownerId: productGid,
-        namespace: PRODUCT_RUNTIME_METAFIELD_NAMESPACE,
-        key: PRODUCT_ITEM_OFF_PERCENT_METAFIELD_KEY,
-        type: "number_decimal",
-        value: String(nextItemPercent),
-      },
-      {
-        ownerId: productGid,
-        namespace: PRODUCT_RUNTIME_METAFIELD_NAMESPACE,
-        key: PRODUCT_OTHER_ELIGIBLE_METAFIELD_KEY,
-        type: "boolean",
-        value: nextOther ? "true" : "false",
-      },
-    );
-  }
-
-  if (metafieldsInputs.length === 0) return userErrors;
-
-  for (let i = 0; i < metafieldsInputs.length; i += PRODUCT_METAFIELDS_SET_BATCH_SIZE) {
-    const chunk = metafieldsInputs.slice(i, i + PRODUCT_METAFIELDS_SET_BATCH_SIZE);
-    try {
-      const response = await admin.graphql(
-        `#graphql
-        mutation SetRuntimeProductMetafields($metafields: [MetafieldsSetInput!]!) {
-          metafieldsSet(metafields: $metafields) {
-            userErrors { field message }
-          }
-        }`,
-        { variables: { metafields: chunk } },
-      );
-      const json = await response.json();
-      for (const e of json?.errors ?? []) {
-        userErrors.push({
-          field: ["productRuntimeMetafields", "graphql"],
-          message: String(e?.message ?? "GraphQL error"),
-        });
-      }
-      for (const e of json?.data?.metafieldsSet?.userErrors ?? []) {
-        userErrors.push({
-          field: Array.isArray(e?.field) ? e.field : ["productRuntimeMetafields"],
-          message: String(e?.message ?? "Unknown error"),
-        });
-      }
-    } catch (error) {
-      userErrors.push({
-        field: ["productRuntimeMetafields", "mutation"],
-        message: `Failed to set product metafields: ${String((error as Error)?.message ?? error)}`,
-      });
-    }
-  }
-
-  return userErrors;
 }
 
 function parseConfig(raw: string | null | undefined): DiscountConfig {
@@ -2477,19 +2294,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const json = await persistConfig(admin, configOwnerId, config, {
     shopOwnerId: shopMeta.shopId,
   });
-  const productMetafieldErrors = await syncRuntimeProductMetafields(
-    admin,
-    current,
-    config,
-    getCollectionProductIdsCached,
-  );
-  const allErrors = [
-    ...(json?.data?.metafieldsSet?.userErrors ?? []),
-    ...productMetafieldErrors,
-  ];
   return {
-    ok: allErrors.length === 0,
-    errors: allErrors,
+    ok: (json?.data?.metafieldsSet?.userErrors ?? []).length === 0,
+    errors: json?.data?.metafieldsSet?.userErrors ?? [],
     conflicts: detectConflicts(config),
   };
 };

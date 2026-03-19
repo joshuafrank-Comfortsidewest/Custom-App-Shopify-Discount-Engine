@@ -362,45 +362,47 @@ fn cart_lines_discounts_generate_run(
     let vip_active = discount_percents.vip > 0.0;
     let first_active = discount_percents.first_order > 0.0;
 
-    let mut other_eligible_qty: f64 = 0.0;
-    let mut other_line_units: Vec<LineUnit> = vec![];
-    for line in input.cart().lines().iter() {
-        if let Merchandise::ProductVariant(variant) = line.merchandise() {
-            if !parse_product_bool_metafield(
-                variant
-                    .product()
-                    .other_eligible_metafield()
-                    .map(|metafield| metafield.value().as_str()),
-            ) {
-                continue;
-            }
-            let qty = *line.quantity();
-            if qty <= 0 {
-                continue;
-            }
-            other_eligible_qty += qty as f64;
-            let subtotal = line.cost().subtotal_amount().amount().0;
-            let unit_price = subtotal / (qty as f64);
-            other_line_units.push(LineUnit {
-                line_id: line.id().to_string(),
-                qty,
-                unit_price,
-            });
-        }
-    }
+    let collection_spend_products: HashSet<String> = config
+        .collection_spend_rule
+        .product_ids
+        .iter()
+        .map(|product_id| normalize_product_id(product_id))
+        .collect();
 
     let requested_other_units = collection_spend_discountable_units(
         &config,
+        &collection_spend_products,
         &entered_codes,
         bulk_active,
         vip_active,
         first_active,
-        input.cart().cost().subtotal_amount().amount().0,
-        other_eligible_qty,
+        &input,
     );
     // Apply one fixed-unit discount per spend step (e.g. $3000 => 2 units),
     // prioritizing highest-priced eligible units first.
     let other_units_to_allocate = requested_other_units.max(0);
+    let mut other_line_units: Vec<LineUnit> = vec![];
+    if other_units_to_allocate > 0 {
+        for line in input.cart().lines().iter() {
+            if let Merchandise::ProductVariant(variant) = line.merchandise() {
+                let normalized_pid = normalize_product_id(variant.product().id());
+                if !collection_spend_products.contains(&normalized_pid) {
+                    continue;
+                }
+                let qty = *line.quantity();
+                if qty <= 0 {
+                    continue;
+                }
+                let subtotal = line.cost().subtotal_amount().amount().0;
+                let unit_price = subtotal / (qty as f64);
+                other_line_units.push(LineUnit {
+                    line_id: line.id().to_string(),
+                    qty,
+                    unit_price,
+                });
+            }
+        }
+    }
     let (selected_other_units_by_line, _) =
         allocate_high_value_units(&other_line_units, other_units_to_allocate);
     let order_level_percent = discount_percents
@@ -434,14 +436,6 @@ fn cart_lines_discounts_generate_run(
             if let Some(percent) = product_item_percents.get(&normalized_pid) {
                 item_percent = item_percent.max(*percent);
             }
-            if let Some(percent) = parse_product_percent_metafield(
-                variant
-                    .product()
-                    .item_off_percent_metafield()
-                    .map(|metafield| metafield.value().as_str()),
-            ) {
-                item_percent = item_percent.max(percent);
-            }
             for rule in hvac_active_rules.iter() {
                 let rule_percent_qty = *rule.percent_target_qty_by_line.get(&line_id).unwrap_or(&0);
                 if rule_percent_qty > 0 && rule.percent_off > 0.0 {
@@ -462,7 +456,9 @@ fn cart_lines_discounts_generate_run(
                     }
                 }
             }
-            fixed_qty = *selected_other_units_by_line.get(&line_id).unwrap_or(&0);
+            if collection_spend_products.contains(&normalized_pid) {
+                fixed_qty = *selected_other_units_by_line.get(&line_id).unwrap_or(&0);
+            }
         }
 
         let base_percent_candidate = order_level_percent.max(item_percent);
@@ -634,12 +630,12 @@ fn cart_lines_discounts_generate_run(
 
 fn collection_spend_discountable_units(
     config: &RuntimeConfig,
+    product_set: &HashSet<String>,
     entered_codes: &[String],
     bulk_active: bool,
     vip_active: bool,
     first_active: bool,
-    cart_subtotal: f64,
-    eligible_qty: f64,
+    input: &schema::cart_lines_discounts_generate_run::Input,
 ) -> i32 {
     // Only require the dedicated rule toggle; do not depend on top UI toggle.
     if !config.collection_spend_rule.enabled {
@@ -657,9 +653,20 @@ fn collection_spend_discountable_units(
         return 0;
     }
 
+    let mut qty: f64 = 0.0;
+    for line in input.cart().lines().iter() {
+        if let Merchandise::ProductVariant(variant) = line.merchandise() {
+            let normalized_pid = normalize_product_id(variant.product().id());
+            if product_set.contains(&normalized_pid) {
+                qty += *line.quantity() as f64;
+            }
+        }
+    }
+
+    let cart_subtotal = input.cart().cost().subtotal_amount().amount().0;
     compute_collection_spend_units(
         cart_subtotal,
-        eligible_qty,
+        qty,
         rule.min_collection_qty,
         rule.spend_step_amount,
         rule.amount_off_per_step,
@@ -907,22 +914,6 @@ fn vip_tag_to_percent(tag: &str) -> Option<f64> {
         Some(value as f64)
     } else {
         None
-    }
-}
-
-fn parse_product_percent_metafield(raw: Option<&str>) -> Option<f64> {
-    let value = raw?.trim().parse::<f64>().ok()?;
-    if (0.0..=100.0).contains(&value) {
-        Some(value)
-    } else {
-        None
-    }
-}
-
-fn parse_product_bool_metafield(raw: Option<&str>) -> bool {
-    match raw.map(|value| value.trim().to_ascii_lowercase()) {
-        Some(value) if value == "true" || value == "1" || value == "yes" => true,
-        _ => false,
     }
 }
 
