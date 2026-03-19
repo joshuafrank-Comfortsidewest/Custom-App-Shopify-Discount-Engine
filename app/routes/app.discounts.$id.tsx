@@ -1056,14 +1056,21 @@ async function persistConfig(
     type: string;
     value: string;
   }>) => {
-    const response = await admin.graphql(
-      `#graphql
-      mutation m($metafields: [MetafieldsSetInput!]!) {
-        metafieldsSet(metafields: $metafields) { userErrors { field message } }
-      }`,
-      { variables: { metafields } },
-    );
-    return response.json();
+    try {
+      const response = await admin.graphql(
+        `#graphql
+        mutation m($metafields: [MetafieldsSetInput!]!) {
+          metafieldsSet(metafields: $metafields) { userErrors { field message } }
+        }`,
+        { variables: { metafields } },
+      );
+      return response.json();
+    } catch (error) {
+      return {
+        data: { metafieldsSet: { userErrors: [] } },
+        errors: [{ message: String((error as Error)?.message ?? error ?? "GraphQL error") }],
+      };
+    }
   };
 
   const userErrors: Array<{ field: string[]; message: string }> = [];
