@@ -316,7 +316,25 @@ const parseRequestedSkuTokens = (raw: unknown) =>
     .split(/[\n,; ]+/)
     .map((v) => normalizeSkuPart(v))
     .filter(Boolean);
-const isNumericOffTag = (tag: string) => /^\d+\s*off$/i.test(String(tag ?? "").trim());
+const OFF_TAG_REGEX = /^(\d+(?:\.\d+)?)\s*off$/i;
+const isNumericOffTag = (tag: string) => OFF_TAG_REGEX.test(String(tag ?? "").trim());
+const formatPercentForTag = (value: number) => {
+  if (!Number.isFinite(value)) return "";
+  const fixed = value.toFixed(2);
+  return fixed.replace(/\.?0+$/, "");
+};
+const offTagCandidatesForPercent = (value: number) => {
+  if (!Number.isFinite(value) || value <= 0) return [];
+  const normalized = Number(value.toFixed(2));
+  const raw = String(value).trim();
+  const fixedTwo = normalized.toFixed(2);
+  const trimmed = formatPercentForTag(normalized);
+  const oneDecimal = normalized.toFixed(1).replace(/\.0$/, "");
+  const forms = Array.from(
+    new Set([raw, fixedTwo, oneDecimal, trimmed].map((v) => v.trim()).filter(Boolean)),
+  );
+  return forms.map((n) => `${n} off`);
+};
 const randomId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 const AUTO_TAG_JOB_BATCH_SIZE = 20;
 const AUTO_TAG_JOB_MAX_HISTORY_CHANGES = 250;
@@ -1268,6 +1286,34 @@ async function fetchCollectionProductIds(admin: any, collectionId: string): Prom
   return ids;
 }
 
+async function fetchProductIdsByTag(admin: any, tag: string): Promise<string[]> {
+  const cleanTag = String(tag ?? "").trim();
+  if (!cleanTag) return [];
+  const ids: string[] = [];
+  let after: string | null = null;
+  const query = `tag:'${cleanTag.replace(/'/g, "\\'")}'`;
+  while (true) {
+    const response: any = await admin.graphql(
+      `#graphql
+      query productsByTag($after: String, $query: String!) {
+        products(first: 250, after: $after, query: $query) {
+          nodes { id }
+          pageInfo { hasNextPage endCursor }
+        }
+      }`,
+      { variables: { after, query } },
+    );
+    const json: any = await response.json();
+    const block: any = json?.data?.products;
+    if (!block) break;
+    for (const n of block.nodes ?? []) if (n?.id) ids.push(String(n.id));
+    if (!block.pageInfo?.hasNextPage) break;
+    after = block.pageInfo.endCursor ?? null;
+    if (!after) break;
+  }
+  return ids;
+}
+
 function parseConfig(raw: string | null | undefined): DiscountConfig {
   if (!raw) return DEFAULT_CONFIG;
   try {
@@ -1589,6 +1635,32 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     collectionProductIdsCache.set(id, ids);
     return ids;
   };
+  const tagProductIdsCache = new Map<string, string[]>();
+  const getTagProductIdsCached = async (tag: string) => {
+    const key = String(tag ?? "").trim().toLowerCase();
+    if (!key) return [];
+    if (tagProductIdsCache.has(key)) {
+      return tagProductIdsCache.get(key) ?? [];
+    }
+    const ids = await fetchProductIdsByTag(admin, tag);
+    tagProductIdsCache.set(key, ids);
+    return ids;
+  };
+  const getItemRuleProductIds = async (collectionId: string, percent: number) => {
+    const collectionIds = await getCollectionProductIdsCached(collectionId);
+    const tagCandidates = offTagCandidatesForPercent(percent);
+    if (tagCandidates.length === 0) {
+      return Array.from(new Set(collectionIds));
+    }
+    const taggedGroups = await Promise.all(tagCandidates.map((tag) => getTagProductIdsCached(tag)));
+    const merged = new Set(collectionIds);
+    for (const group of taggedGroups) {
+      for (const productId of group) {
+        if (productId) merged.add(productId);
+      }
+    }
+    return Array.from(merged);
+  };
 
   if (intent === "auto_tag_apply") {
     const mode = String(fd.get("auto_tag_mode") ?? "tag") === "untag_discount" ? "untag_discount" : "tag";
@@ -1842,7 +1914,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           .map(async (r) => ({
             collection_id: r.collection_id,
             percent: r.percent,
-            product_ids: await getCollectionProductIdsCached(r.collection_id),
+            product_ids: await getItemRuleProductIds(r.collection_id, r.percent),
           })),
       )
     : hasItemInputs
@@ -1856,7 +1928,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           return Promise.all(
             rules.map(async (r) => ({
               ...r,
-              product_ids: await getCollectionProductIdsCached(r.collection_id),
+              product_ids: await getItemRuleProductIds(r.collection_id, r.percent),
             })),
           );
         })()
@@ -2122,10 +2194,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     const brandRefrigerantFilteredSourceSkus = constrainedIndoorSourceSkus.filter((sku) => {
       const indoorBrand = String(indoorBrandBySku.get(sku) ?? "").trim();
       const indoorRefrigerant = String(indoorRefrigerantBySku.get(sku) ?? "").trim();
-      const brandOk = Boolean(ruleBrand) && Boolean(indoorBrand) && norm(indoorBrand) === norm(ruleBrand);
+      // Don't drop valid mappings when metadata is incomplete; only enforce exact match
+      // when both sides have a value.
+      const brandOk =
+        !ruleBrand || !indoorBrand || norm(indoorBrand) === norm(ruleBrand);
       const refrigerantOk =
-        Boolean(ruleRefrigerant) &&
-        Boolean(indoorRefrigerant) &&
+        !ruleRefrigerant ||
+        !indoorRefrigerant ||
         norm(indoorRefrigerant) === norm(ruleRefrigerant);
       return brandOk && refrigerantOk;
     });
