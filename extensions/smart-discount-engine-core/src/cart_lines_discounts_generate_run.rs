@@ -14,7 +14,6 @@ struct DiscountPercents {
 
 #[derive(Clone)]
 struct HvacActiveRule {
-    name: String,
     stack_mode: String,
     percent_off: f64,
     amount_off_outdoor_per_bundle: f64,
@@ -294,14 +293,7 @@ fn cart_lines_discounts_generate_run(
         app_function_config_metafield_json,
         &app_function_config_chunk_values,
     );
-    let shop_metafield_json = input
-        .shop()
-        .app_runtime_config_metafield()
-        .map(|metafield| metafield.value())
-        .map(|value| value.to_string())
-        .filter(|value| !value.is_empty());
-    let metafield_json = discount_metafield_json.or(shop_metafield_json);
-    let config = runtime_config(metafield_json.as_deref());
+    let config = runtime_config(discount_metafield_json.as_deref());
 
     let entered_codes: Vec<String> = input
         .entered_discount_codes()
@@ -441,6 +433,14 @@ fn cart_lines_discounts_generate_run(
             let normalized_pid = normalize_product_id(variant.product().id());
             if let Some(percent) = product_item_percents.get(&normalized_pid) {
                 item_percent = item_percent.max(*percent);
+            }
+            for tag_match in variant.product().has_tags().iter() {
+                if !*tag_match.has_tag() {
+                    continue;
+                }
+                if let Some(percent) = item_off_tag_to_percent(tag_match.tag()) {
+                    item_percent = item_percent.max(percent);
+                }
             }
             for rule in hvac_active_rules.iter() {
                 let rule_percent_qty = *rule.percent_target_qty_by_line.get(&line_id).unwrap_or(&0);
@@ -809,7 +809,6 @@ fn active_hvac_rules(
         let percent_subtotal = selected_outdoor_subtotal + selected_indoor_subtotal;
         let est = (percent_subtotal * (percent / 100.0)) + ((fixed_units as f64) * amount);
         candidate_rules.push(HvacActiveRule {
-            name: rule.name.clone(),
             stack_mode: rule.stack_mode.clone(),
             percent_off: percent,
             amount_off_outdoor_per_bundle: amount,
@@ -918,6 +917,17 @@ fn vip_tag_to_percent(tag: &str) -> Option<f64> {
     let value = tag[3..].parse::<u8>().ok()?;
     if (1..=99).contains(&value) {
         Some(value as f64)
+    } else {
+        None
+    }
+}
+
+fn item_off_tag_to_percent(tag: &str) -> Option<f64> {
+    let normalized = tag.trim().to_ascii_lowercase();
+    let numeric = normalized.strip_suffix(" off")?.trim();
+    let percent = numeric.parse::<f64>().ok()?;
+    if percent > 0.0 && percent <= 99.0 {
+        Some(percent)
     } else {
         None
     }
