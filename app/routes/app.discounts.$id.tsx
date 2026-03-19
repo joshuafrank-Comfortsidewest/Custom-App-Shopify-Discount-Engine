@@ -2291,12 +2291,64 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   config.hvac_rule.enabled =
     topHvacEnabled || hvacCombinationRules.some((r) => Boolean(r?.enabled));
 
+  const runtimePreview = buildRuntimeFunctionConfig(config);
+  const runtimeItemRuleCount = runtimePreview.item_collection_rules.length;
+  const runtimeItemProductCount = runtimePreview.item_collection_rules.reduce(
+    (sum, rule) => sum + (Array.isArray(rule.product_ids) ? rule.product_ids.length : 0),
+    0,
+  );
+  const runtimeOtherProductCount = Array.isArray(runtimePreview.collection_spend_rule?.product_ids)
+    ? runtimePreview.collection_spend_rule.product_ids.length
+    : 0;
+  const runtimeBytes = Buffer.byteLength(JSON.stringify(runtimePreview), "utf8");
+  const zeroResolvedItemRules = (config.item_collection_rules ?? []).filter(
+    (rule) =>
+      String(rule?.collection_id ?? "").trim() &&
+      Number(rule?.percent ?? 0) > 0 &&
+      (!Array.isArray(rule?.product_ids) || rule.product_ids.length === 0),
+  );
+  const resolutionWarnings: Array<{ field: string[]; message: string }> = [];
+  if (
+    config.toggles.item_collection_enabled &&
+    zeroResolvedItemRules.length > 0
+  ) {
+    resolutionWarnings.push({
+      field: ["item_collection_rules"],
+      message: `Item Rules resolved 0 products for ${zeroResolvedItemRules.length} selected collection(s). Verify those collections contain products and the app has product read access.`,
+    });
+  }
+  if (
+    config.collection_spend_rule.enabled &&
+    String(config.collection_spend_rule.collection_id ?? "").trim() &&
+    runtimeOtherProductCount === 0
+  ) {
+    resolutionWarnings.push({
+      field: ["collection_spend_rule", "collection_id"],
+      message:
+        "Other Discounts selected collection resolved 0 products. Verify the collection contains products and app product access is active.",
+    });
+  }
+  console.info(
+    `[discount-save-runtime] owner=${configOwnerId} itemRules=${runtimeItemRuleCount} itemProducts=${runtimeItemProductCount} otherEnabled=${config.collection_spend_rule.enabled} otherProducts=${runtimeOtherProductCount} runtimeBytes=${runtimeBytes} runtimeChunked=${runtimeBytes > FUNCTION_CONFIG_MAX_BYTES}`,
+  );
+
   const json = await persistConfig(admin, configOwnerId, config, {
     shopOwnerId: shopMeta.shopId,
   });
+  const allErrors = [
+    ...(json?.data?.metafieldsSet?.userErrors ?? []),
+    ...resolutionWarnings,
+  ];
+  if (allErrors.length > 0) {
+    console.warn(
+      `[discount-save-runtime-warning] ${allErrors
+        .map((e) => String(e?.message ?? "Unknown error"))
+        .join(" | ")}`,
+    );
+  }
   return {
-    ok: (json?.data?.metafieldsSet?.userErrors ?? []).length === 0,
-    errors: json?.data?.metafieldsSet?.userErrors ?? [],
+    ok: allErrors.length === 0,
+    errors: allErrors,
     conflicts: detectConflicts(config),
   };
 };
