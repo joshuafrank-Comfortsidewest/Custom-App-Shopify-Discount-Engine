@@ -2325,9 +2325,15 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     config.toggles.item_collection_enabled &&
     zeroResolvedItemRules.length > 0
   ) {
+    const zeroResolvedCollectionIds = zeroResolvedItemRules
+      .map((rule) => String(rule?.collection_id ?? "").trim())
+      .filter(Boolean);
+    const sample = zeroResolvedCollectionIds.slice(0, 3).join(", ");
     resolutionWarnings.push({
       field: ["item_collection_rules"],
-      message: `Item Rules resolved 0 products for ${zeroResolvedItemRules.length} selected collection(s). Verify those collections contain products and the app has product read access.`,
+      message: `Item Rules resolved 0 products for ${zeroResolvedItemRules.length} selected collection(s)${
+        sample ? ` (${sample}${zeroResolvedCollectionIds.length > 3 ? ", ..." : ""})` : ""
+      }. Verify those collections contain products and the app has product read access.`,
     });
   }
   if (
