@@ -290,22 +290,19 @@ fn cart_lines_discounts_generate_run(
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
     ];
-    let metafield_json = resolve_runtime_config_json(
+    let discount_metafield_json = resolve_runtime_config_json(
         app_function_config_metafield_json,
         &app_function_config_chunk_values,
     );
-    let use_tag_item_fallback = metafield_json.is_none();
+    let shop_metafield_json = input
+        .shop()
+        .app_runtime_config_metafield()
+        .map(|metafield| metafield.value())
+        .map(|value| value.to_string())
+        .filter(|value| !value.is_empty());
+    let metafield_json = discount_metafield_json.or(shop_metafield_json);
 
     let config = runtime_config(metafield_json.as_deref());
-
-    let has_product_discount_class = input
-        .discount()
-        .discount_classes()
-        .contains(&schema::DiscountClass::Product);
-
-    if !has_product_discount_class {
-        return Ok(schema::CartLinesDiscountsGenerateRunResult { operations: vec![] });
-    }
 
     let entered_codes: Vec<String> = input
         .entered_discount_codes()
@@ -444,16 +441,6 @@ fn cart_lines_discounts_generate_run(
             let normalized_pid = normalize_product_id(variant.product().id());
             if let Some(percent) = product_item_percents.get(&normalized_pid) {
                 item_percent = item_percent.max(*percent);
-            }
-            if use_tag_item_fallback {
-                for tag_match in variant.product().has_tags().iter() {
-                    if !*tag_match.has_tag() {
-                        continue;
-                    }
-                    if let Some(percent) = item_off_tag_to_percent(tag_match.tag()) {
-                        item_percent = item_percent.max(percent);
-                    }
-                }
             }
             for rule in hvac_active_rules.iter() {
                 let rule_percent_qty = *rule.percent_target_qty_by_line.get(&line_id).unwrap_or(&0);
