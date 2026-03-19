@@ -890,7 +890,7 @@ async function persistConfig(
   admin: any,
   ownerId: string,
   config: DiscountConfig,
-  options?: { skipRuntime?: boolean; shopOwnerId?: string },
+  options?: { skipRuntime?: boolean; shopOwnerId?: string; runtimeOwnerIds?: string[] },
 ) {
   const payload = JSON.stringify(buildAdminConfiguration(config));
   const skipRuntime = Boolean(options?.skipRuntime);
@@ -899,6 +899,16 @@ async function persistConfig(
     ? ""
     : JSON.stringify(buildRuntimeFunctionConfig(config));
   const cleanedOwnerId = String(ownerId ?? "").trim();
+  const runtimeOwnerIds = Array.from(
+    new Set(
+      (options?.runtimeOwnerIds ?? [])
+        .map((value) => String(value ?? "").trim())
+        .filter(Boolean),
+    ),
+  );
+  if (runtimeOwnerIds.length === 0 && cleanedOwnerId) {
+    runtimeOwnerIds.push(cleanedOwnerId);
+  }
   if (!cleanedOwnerId) {
     return {
       data: {
@@ -967,35 +977,38 @@ async function persistConfig(
     const runtimeBytes = Buffer.byteLength(runtimePayload, "utf8");
 
     if (runtimeBytes <= FUNCTION_CONFIG_MAX_BYTES) {
-      runtimeMetafields.push({
-        ownerId: cleanedOwnerId,
-        namespace: "$app",
-        key: FUNCTION_CONFIG_KEY,
-        type: "json",
-        value: runtimePayload,
-      });
+      for (const runtimeOwnerId of runtimeOwnerIds) {
+        runtimeMetafields.push({
+          ownerId: runtimeOwnerId,
+          namespace: "$app",
+          key: FUNCTION_CONFIG_KEY,
+          type: "json",
+          value: runtimePayload,
+        });
+      }
     } else {
       const chunks = splitUtf8ByBytes(runtimePayload, FUNCTION_CONFIG_CHUNK_MAX_BYTES);
       if (chunks.length > FUNCTION_CONFIG_MAX_CHUNKS) {
         runtimeWarning = `Runtime function config is too large (${runtimeBytes} bytes). Settings were saved, but checkout runtime was not updated. Reduce selected item/HVAC products or use fewer large collection rules, then save again.`;
       } else {
-        runtimeMetafields.push({
-          ownerId: cleanedOwnerId,
-          namespace: "$app",
-          key: FUNCTION_CONFIG_KEY,
-          type: "json",
-          value: JSON.stringify({ chunked: true, parts: chunks.length }),
-        });
-
-        chunks.forEach((chunk, idx) => {
+        for (const runtimeOwnerId of runtimeOwnerIds) {
           runtimeMetafields.push({
-            ownerId: cleanedOwnerId,
+            ownerId: runtimeOwnerId,
             namespace: "$app",
-            key: `${FUNCTION_CONFIG_CHUNK_KEY_PREFIX}${idx + 1}`,
-            type: "multi_line_text_field",
-            value: chunk,
+            key: FUNCTION_CONFIG_KEY,
+            type: "json",
+            value: JSON.stringify({ chunked: true, parts: chunks.length }),
           });
-        });
+          chunks.forEach((chunk, idx) => {
+            runtimeMetafields.push({
+              ownerId: runtimeOwnerId,
+              namespace: "$app",
+              key: `${FUNCTION_CONFIG_CHUNK_KEY_PREFIX}${idx + 1}`,
+              type: "multi_line_text_field",
+              value: chunk,
+            });
+          });
+        }
       }
     }
     if (runtimeMetafields.length > 0 && cleanedShopOwnerId) {
@@ -2329,11 +2342,25 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     });
   }
   console.info(
-    `[discount-save-runtime] owner=${configOwnerId} itemRules=${runtimeItemRuleCount} itemProducts=${runtimeItemProductCount} otherEnabled=${config.collection_spend_rule.enabled} otherProducts=${runtimeOtherProductCount} runtimeBytes=${runtimeBytes} runtimeChunked=${runtimeBytes > FUNCTION_CONFIG_MAX_BYTES}`,
+    `[discount-save-runtime] owner=${configOwnerId} runtimeOwners=${Array.from(
+      new Set(
+        [currentMeta.discountId, configOwnerId]
+          .map((value) => String(value ?? "").trim())
+          .filter(Boolean),
+      ),
+    ).join(",")} itemRules=${runtimeItemRuleCount} itemProducts=${runtimeItemProductCount} otherEnabled=${config.collection_spend_rule.enabled} otherProducts=${runtimeOtherProductCount} runtimeBytes=${runtimeBytes} runtimeChunked=${runtimeBytes > FUNCTION_CONFIG_MAX_BYTES}`,
   );
 
+  const runtimeOwnerIds = Array.from(
+    new Set(
+      [currentMeta.discountId, configOwnerId]
+        .map((value) => String(value ?? "").trim())
+        .filter(Boolean),
+    ),
+  );
   const json = await persistConfig(admin, configOwnerId, config, {
     shopOwnerId: shopMeta.shopId,
+    runtimeOwnerIds,
   });
   const allErrors = [
     ...(json?.data?.metafieldsSet?.userErrors ?? []),
