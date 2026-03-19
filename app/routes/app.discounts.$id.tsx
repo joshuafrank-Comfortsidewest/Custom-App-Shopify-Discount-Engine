@@ -1332,9 +1332,7 @@ async function syncRuntimeProductMetafields(
     }
   }
 
-  const previousItemPercentByProduct = buildItemPercentByProduct(previousConfig, collectionProductsById);
   const nextItemPercentByProduct = buildItemPercentByProduct(nextConfig, collectionProductsById);
-  const previousOtherEligible = buildOtherEligibleProductSet(previousConfig, collectionProductsById);
   const nextOtherEligible = buildOtherEligibleProductSet(nextConfig, collectionProductsById);
 
   const impactedProductIds = new Set<string>();
@@ -1360,14 +1358,8 @@ async function syncRuntimeProductMetafields(
     const normalizedId = compactProductId(productGid);
     if (!normalizedId) continue;
 
-    const previousItemPercent = Math.max(0, previousItemPercentByProduct.get(normalizedId) ?? 0);
     const nextItemPercent = Math.max(0, nextItemPercentByProduct.get(normalizedId) ?? 0);
-    const previousOther = previousOtherEligible.has(normalizedId);
     const nextOther = nextOtherEligible.has(normalizedId);
-
-    if (Math.abs(previousItemPercent - nextItemPercent) < 0.0001 && previousOther === nextOther) {
-      continue;
-    }
 
     metafieldsInputs.push(
       {
