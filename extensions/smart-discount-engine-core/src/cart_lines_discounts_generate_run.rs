@@ -288,15 +288,6 @@ fn cart_lines_discounts_generate_run(
     );
     let config = runtime_config(metafield_json.as_deref());
 
-    let has_product_discount_class = input
-        .discount()
-        .discount_classes()
-        .contains(&schema::DiscountClass::Product);
-
-    if !has_product_discount_class {
-        return Ok(schema::CartLinesDiscountsGenerateRunResult { operations: vec![] });
-    }
-
     let entered_codes: Vec<String> = input
         .entered_discount_codes()
         .iter()
