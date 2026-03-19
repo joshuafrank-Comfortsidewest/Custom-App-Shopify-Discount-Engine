@@ -1131,9 +1131,11 @@ async function loadDiscountOwnersAndConfig(admin: any, discountGid: string) {
           discount {
             __typename
             ... on DiscountAutomaticApp {
+              id
               discountId
             }
             ... on DiscountCodeApp {
+              id
               discountId
             }
           }
@@ -1145,6 +1147,7 @@ async function loadDiscountOwnersAndConfig(admin: any, discountGid: string) {
   const node = json?.data?.discountNode;
   const nodeId = String(node?.id ?? "").trim();
   const discountType = String(node?.discount?.__typename ?? "").trim();
+  const discountOwnerId = String(node?.discount?.id ?? "").trim();
   const discountId = String(node?.discount?.discountId ?? "").trim();
   const adminConfigRaw = resolveChunkedConfigJson(node?.adminConfiguration?.value, [
     node?.adminConfigurationPart1?.value,
@@ -1163,7 +1166,7 @@ async function loadDiscountOwnersAndConfig(admin: any, discountGid: string) {
     node?.appMetafield?.value ??
     node?.legacyMetafield?.value ??
     null;
-  return { nodeId, discountId, discountType, configRaw };
+  return { nodeId, discountOwnerId, discountId, discountType, configRaw };
 }
 
 async function loadShopConfig(admin: any) {
@@ -2350,7 +2353,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   console.info(
     `[discount-save-runtime] owner=${configOwnerId} runtimeOwners=${Array.from(
       new Set(
-        [currentMeta.discountId, configOwnerId]
+        [currentMeta.discountOwnerId, currentMeta.discountId, configOwnerId]
           .map((value) => String(value ?? "").trim())
           .filter(Boolean),
       ),
@@ -2359,7 +2362,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   const runtimeOwnerIds = Array.from(
     new Set(
-      [currentMeta.discountId, configOwnerId]
+      [currentMeta.discountOwnerId, currentMeta.discountId, configOwnerId]
         .map((value) => String(value ?? "").trim())
         .filter(Boolean),
     ),
