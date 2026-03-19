@@ -196,16 +196,6 @@ const toBool = (v: FormDataEntryValue | null, d = false) =>
   v == null ? d : ["1", "true", "on"].includes(String(v).toLowerCase());
 const toDiscountGid = (raw: string) =>
   raw.startsWith("gid://") ? raw : `gid://shopify/DiscountAutomaticNode/${raw}`;
-const toAppDiscountOwnerGid = (discountType: string, discountId: string) => {
-  const raw = String(discountId ?? "").trim();
-  if (!raw) return "";
-  if (raw.startsWith("gid://")) return raw;
-  if (!/^\d+$/.test(raw)) return raw;
-  const type = String(discountType ?? "").trim();
-  if (type === "DiscountCodeApp") return `gid://shopify/DiscountCodeApp/${raw}`;
-  if (type === "DiscountAutomaticApp") return `gid://shopify/DiscountAutomaticApp/${raw}`;
-  return raw;
-};
 const deriveRuntimeOwnerIds = (...rawValues: unknown[]) => {
   const out = new Set<string>();
   rawValues.forEach((value) => {
@@ -1176,7 +1166,7 @@ async function loadDiscountOwnersAndConfig(admin: any, discountGid: string) {
   const discountClasses = Array.isArray(node?.discount?.discountClasses)
     ? node.discount.discountClasses.map((value: any) => String(value ?? "").trim()).filter(Boolean)
     : [];
-  const discountOwnerId = toAppDiscountOwnerGid(discountType, discountId);
+  const discountOwnerId = discountId;
   const adminConfigRaw = resolveChunkedConfigJson(node?.adminConfiguration?.value, [
     node?.adminConfigurationPart1?.value,
     node?.adminConfigurationPart2?.value,
