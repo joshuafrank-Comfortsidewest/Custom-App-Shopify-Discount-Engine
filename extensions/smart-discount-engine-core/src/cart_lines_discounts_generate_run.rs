@@ -290,10 +290,17 @@ fn cart_lines_discounts_generate_run(
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
     ];
-    let metafield_json = resolve_runtime_config_json(
+    let discount_metafield_json = resolve_runtime_config_json(
         app_function_config_metafield_json,
         &app_function_config_chunk_values,
     );
+    let shop_metafield_json = input
+        .shop()
+        .app_runtime_config_metafield()
+        .map(|metafield| metafield.value())
+        .map(|value| value.to_string())
+        .filter(|value| !value.is_empty());
+    let metafield_json = discount_metafield_json.or(shop_metafield_json);
     let config = runtime_config(metafield_json.as_deref());
 
     let entered_codes: Vec<String> = input
