@@ -196,6 +196,16 @@ const toBool = (v: FormDataEntryValue | null, d = false) =>
   v == null ? d : ["1", "true", "on"].includes(String(v).toLowerCase());
 const toDiscountGid = (raw: string) =>
   raw.startsWith("gid://") ? raw : `gid://shopify/DiscountAutomaticNode/${raw}`;
+const toAppDiscountOwnerGid = (discountType: string, discountId: string) => {
+  const raw = String(discountId ?? "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("gid://")) return raw;
+  if (!/^\d+$/.test(raw)) return raw;
+  const type = String(discountType ?? "").trim();
+  if (type === "DiscountCodeApp") return `gid://shopify/DiscountCodeApp/${raw}`;
+  if (type === "DiscountAutomaticApp") return `gid://shopify/DiscountAutomaticApp/${raw}`;
+  return raw;
+};
 const bulkPercentForSubtotal = (subtotal: number, config: DiscountConfig) => {
   if (subtotal >= config.bulk15_min) return config.bulk15_percent;
   if (subtotal >= config.bulk13_min) return config.bulk13_percent;
@@ -1131,11 +1141,9 @@ async function loadDiscountOwnersAndConfig(admin: any, discountGid: string) {
           discount {
             __typename
             ... on DiscountAutomaticApp {
-              id
               discountId
             }
             ... on DiscountCodeApp {
-              id
               discountId
             }
           }
@@ -1147,8 +1155,8 @@ async function loadDiscountOwnersAndConfig(admin: any, discountGid: string) {
   const node = json?.data?.discountNode;
   const nodeId = String(node?.id ?? "").trim();
   const discountType = String(node?.discount?.__typename ?? "").trim();
-  const discountOwnerId = String(node?.discount?.id ?? "").trim();
   const discountId = String(node?.discount?.discountId ?? "").trim();
+  const discountOwnerId = toAppDiscountOwnerGid(discountType, discountId);
   const adminConfigRaw = resolveChunkedConfigJson(node?.adminConfiguration?.value, [
     node?.adminConfigurationPart1?.value,
     node?.adminConfigurationPart2?.value,
@@ -2351,7 +2359,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     });
   }
   console.info(
-    `[discount-save-runtime] owner=${configOwnerId} runtimeOwners=${Array.from(
+    `[discount-save-runtime] owner=${configOwnerId} nodeId=${String(
+      currentMeta.nodeId ?? "",
+    ).trim()} discountType=${String(currentMeta.discountType ?? "").trim()} discountId=${String(
+      currentMeta.discountId ?? "",
+    ).trim()} runtimeOwners=${Array.from(
       new Set(
         [currentMeta.discountOwnerId, currentMeta.discountId, configOwnerId]
           .map((value) => String(value ?? "").trim())
