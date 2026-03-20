@@ -2361,10 +2361,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   const runtimePreview = buildRuntimeFunctionConfig(config);
   const runtimePreviewBytes = Buffer.byteLength(JSON.stringify(runtimePreview), "utf8");
-  const probeProductId = "7914534076531";
-  const probeInItemRules = (config.item_collection_rules ?? []).some((rule) =>
-    (rule.product_ids ?? []).some((pid) => compactProductId(pid) === probeProductId),
-  );
+  const probeProductIds = ["7914534076531", "7669624406131"];
+  const probeInItemRules = probeProductIds.map((probeProductId) => ({
+    productId: probeProductId,
+    inItemRules: (config.item_collection_rules ?? []).some((rule) =>
+      (rule.product_ids ?? []).some((pid) => compactProductId(pid) === probeProductId),
+    ),
+  }));
   console.info("[discount-save] runtime-summary", {
     shop: session.shop,
     discountNodeId: configOwnerId,
@@ -2377,7 +2380,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     otherDiscountsEnabled: config.toggles.collection_spend_enabled,
     otherDiscountCollectionId: csCollectionId,
     otherDiscountProductCount: csProductIds.length,
-    probeProductId,
     probeInItemRules,
     runtimePreviewBytes,
   });
