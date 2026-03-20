@@ -670,6 +670,8 @@ const ADMIN_CONFIG_MAX_CHUNKS = 8;
 const SHOP_RUNTIME_MIRROR_NAMESPACE = "smart_discount_engine";
 const SHOP_RUNTIME_MIRROR_KEY = "config";
 const SHOP_RUNTIME_APP_MIRROR_NAMESPACE = "$app:smart_discount_engine";
+const RUNTIME_OWNER_ID_PATTERN =
+  /^gid:\/\/shopify\/Discount(?:(?:Automatic|Code)Node|Automatic|Code)\/\d+$/;
 
 function splitUtf8ByBytes(input: string, maxBytes: number): string[] {
   if (maxBytes <= 0) return [input];
@@ -906,7 +908,7 @@ async function persistConfig(
     new Set(
       (options?.runtimeOwnerIds ?? [])
         .map((value) => String(value ?? "").trim())
-        .filter((value) => /^gid:\/\/shopify\/Discount(?:Automatic|Code)Node\/\d+$/.test(value)),
+        .filter((value) => RUNTIME_OWNER_ID_PATTERN.test(value)),
     ),
   );
   if (runtimeOwnerIds.length === 0 && cleanedOwnerId) {
@@ -2391,6 +2393,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         .filter(Boolean),
     ),
   );
+  console.info("[discount-save] runtime-owner-targets", {
+    shop: session.shop,
+    discountNodeId: configOwnerId,
+    runtimeOwnerIds,
+  });
   const json = await persistConfig(admin, configOwnerId, config, {
     shopOwnerId: shopMeta.shopId,
     runtimeOwnerIds,

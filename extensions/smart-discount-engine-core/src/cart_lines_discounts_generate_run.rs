@@ -269,7 +269,7 @@ fn cart_lines_discounts_generate_run(
     let discount = input.discount();
     let shop = input.shop();
     let shop_runtime_config_metafield_json = shop
-        .app_runtime_config_metafield()
+        .runtime_config_metafield()
         .map(|metafield| metafield.value())
         .map(|value| value.as_str());
     let app_function_config_metafield_json = discount
