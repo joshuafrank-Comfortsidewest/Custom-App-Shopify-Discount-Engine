@@ -267,11 +267,16 @@ fn cart_lines_discounts_generate_run(
     input: schema::cart_lines_discounts_generate_run::Input,
 ) -> Result<schema::CartLinesDiscountsGenerateRunResult> {
     let discount = input.discount();
-    let app_function_config_metafield_json = input
-        .discount()
+    let app_function_config_metafield_json = discount
         .app_function_config_metafield()
         .map(|metafield| metafield.value())
-        .map(|value| value.as_str());
+        .map(|value| value.as_str())
+        .or_else(|| {
+            discount
+                .app_function_config_fallback_metafield()
+                .map(|metafield| metafield.value())
+                .map(|value| value.as_str())
+        });
     let app_function_config_chunk_values = [
         discount
             .app_function_config_part_1_metafield()
