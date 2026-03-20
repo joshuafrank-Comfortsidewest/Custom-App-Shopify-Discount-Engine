@@ -2411,11 +2411,39 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   const runtimePreview = buildRuntimeFunctionConfig(config);
   const runtimePreviewBytes = Buffer.byteLength(JSON.stringify(runtimePreview), "utf8");
-  const probeProductIds = ["7914534076531", "7669624406131"];
+  const probeProductIds = ["7914534076531", "7669624406131", "7992554750067", "7992580243571"];
   const probeInItemRules = probeProductIds.map((probeProductId) => ({
     productId: probeProductId,
     inItemRules: (config.item_collection_rules ?? []).some((rule) =>
       (rule.product_ids ?? []).some((pid) => compactProductId(pid) === probeProductId),
+    ),
+  }));
+  const runtimeOtherProductIds = Array.isArray(runtimePreview?.collection_spend_rule?.product_ids)
+    ? runtimePreview.collection_spend_rule.product_ids.map((v: any) => compactProductId(v))
+    : [];
+  const probeInOtherDiscounts = probeProductIds.map((probeProductId) => ({
+    productId: probeProductId,
+    inOtherDiscounts: runtimeOtherProductIds.includes(probeProductId),
+  }));
+  const runtimeHvacRules = Array.isArray(runtimePreview?.hvac_rule?.combination_rules)
+    ? runtimePreview.hvac_rule.combination_rules
+    : [];
+  const runtimeHvacRuleDiagnostics = runtimeHvacRules.slice(0, 8).map((rule: any) => ({
+    name: String(rule?.name ?? "").trim(),
+    enabled: Boolean(rule?.enabled),
+    outdoorSku: String(rule?.outdoor_source_sku ?? "").trim(),
+    indoorCount: Array.isArray(rule?.indoor_product_ids) ? rule.indoor_product_ids.length : 0,
+    outdoorCount: Array.isArray(rule?.outdoor_product_ids) ? rule.outdoor_product_ids.length : 0,
+  }));
+  const probeInHvac = probeProductIds.map((probeProductId) => ({
+    productId: probeProductId,
+    asIndoor: runtimeHvacRules.some((rule: any) =>
+      Array.isArray(rule?.indoor_product_ids) &&
+      rule.indoor_product_ids.some((pid: any) => compactProductId(pid) === probeProductId),
+    ),
+    asOutdoor: runtimeHvacRules.some((rule: any) =>
+      Array.isArray(rule?.outdoor_product_ids) &&
+      rule.outdoor_product_ids.some((pid: any) => compactProductId(pid) === probeProductId),
     ),
   }));
   console.info("[discount-save] runtime-summary", {
@@ -2431,6 +2459,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     otherDiscountCollectionId: csCollectionId,
     otherDiscountProductCount: csProductIds.length,
     probeInItemRules,
+    probeInOtherDiscounts,
+    probeInHvac,
     runtimeItemRuleCount: Array.isArray(runtimePreview.item_collection_rules)
       ? runtimePreview.item_collection_rules.length
       : 0,
@@ -2440,6 +2470,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           0,
         )
       : 0,
+    runtimeOtherDiscountProductCount: runtimeOtherProductIds.length,
+    runtimeHvacEnabled: Boolean(runtimePreview?.hvac_rule?.enabled),
+    runtimeHvacRuleCount: runtimeHvacRules.length,
+    runtimeHvacRuleDiagnostics,
     runtimePreviewBytes,
   });
 
