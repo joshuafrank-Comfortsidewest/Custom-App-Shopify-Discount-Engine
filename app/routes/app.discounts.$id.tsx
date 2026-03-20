@@ -671,21 +671,12 @@ const SHOP_RUNTIME_MIRROR_NAMESPACE = "smart_discount_engine";
 const SHOP_RUNTIME_MIRROR_KEY = "config";
 const SHOP_RUNTIME_APP_MIRROR_NAMESPACE = "$app:smart_discount_engine";
 const RUNTIME_OWNER_ID_PATTERN =
-  /^gid:\/\/shopify\/Discount(?:(?:Automatic|Code)Node|Automatic|Code)\/\d+$/;
+  /^gid:\/\/shopify\/Discount(?:Automatic|Code)Node\/\d+$/;
 
 function deriveRuntimeOwnerIdAliases(value: unknown): string[] {
   const ownerId = String(value ?? "").trim();
   if (!ownerId || !RUNTIME_OWNER_ID_PATTERN.test(ownerId)) return [];
-  const ids = new Set<string>([ownerId]);
-  const automaticNodeMatch = ownerId.match(/^gid:\/\/shopify\/DiscountAutomaticNode\/(\d+)$/);
-  if (automaticNodeMatch) {
-    ids.add(`gid://shopify/DiscountAutomatic/${automaticNodeMatch[1]}`);
-  }
-  const codeNodeMatch = ownerId.match(/^gid:\/\/shopify\/DiscountCodeNode\/(\d+)$/);
-  if (codeNodeMatch) {
-    ids.add(`gid://shopify/DiscountCode/${codeNodeMatch[1]}`);
-  }
-  return Array.from(ids);
+  return [ownerId];
 }
 
 function splitUtf8ByBytes(input: string, maxBytes: number): string[] {
