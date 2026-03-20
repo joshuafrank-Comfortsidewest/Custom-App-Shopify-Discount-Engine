@@ -266,48 +266,46 @@ impl Default for RuntimeConfig {
 fn cart_lines_discounts_generate_run(
     input: schema::cart_lines_discounts_generate_run::Input,
 ) -> Result<schema::CartLinesDiscountsGenerateRunResult> {
-    let shop = input.shop();
-    let runtime_config_metafield_json = shop
+    let discount = input.discount();
+    let runtime_config_metafield_json = discount
         .runtime_config_metafield()
         .map(|metafield| metafield.value())
         .map(|value| value.to_string());
     let runtime_config_chunk_values = [
-        shop
+        discount
             .runtime_config_part_1_metafield()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
-        shop
+        discount
             .runtime_config_part_2_metafield()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
-        shop
+        discount
             .runtime_config_part_3_metafield()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
-        shop
+        discount
             .runtime_config_part_4_metafield()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
     ];
 
     log!(
-        "[sde-checkout-config-sources] shop_legacy_primary={} shop_legacy_chunks={}",
+        "[sde-checkout-config-sources] discount_primary={} discount_chunks={}",
         has_non_empty_value(runtime_config_metafield_json.as_deref()),
         non_empty_chunk_count(&runtime_config_chunk_values),
     );
 
-    let mut runtime_config_source = "default";
-    let mut runtime_config_bytes: usize = 0;
-
-    let config = if let Some((parsed, bytes)) = try_resolve_and_parse_runtime_config(
+    let (config, runtime_config_source, runtime_config_bytes) = if let Some((parsed, bytes)) = try_resolve_and_parse_runtime_config(
         runtime_config_metafield_json.as_deref(),
         &runtime_config_chunk_values,
     ) {
-        runtime_config_source = "shop:smart_discount_engine/config";
-        runtime_config_bytes = bytes;
-        parsed
+        (parsed, "discount:$app/function-configuration", bytes)
     } else {
-        RuntimeConfig::default()
+        log!(
+            "[sde-checkout-config] source=missing bytes=0 parse_ok=false item_rules=0 item_toggle=false hvac_enabled=false hvac_rules=0 other_enabled=false other_products=0"
+        );
+        return Ok(schema::CartLinesDiscountsGenerateRunResult { operations: vec![] });
     };
 
     let runtime_item_rule_products: usize = config
@@ -470,14 +468,6 @@ fn cart_lines_discounts_generate_run(
             line_in_item_rule_map = product_item_percents.contains_key(&normalized_pid);
             if let Some(percent) = product_item_percents.get(&normalized_pid) {
                 item_percent = item_percent.max(*percent);
-            }
-            for tag_match in variant.product().has_tags().iter() {
-                if !*tag_match.has_tag() {
-                    continue;
-                }
-                if let Some(percent) = item_off_tag_to_percent(tag_match.tag()) {
-                    item_percent = item_percent.max(percent);
-                }
             }
             for rule in hvac_active_rules.iter() {
                 let rule_percent_qty = *rule.percent_target_qty_by_line.get(&line_id).unwrap_or(&0);
@@ -1013,23 +1003,6 @@ fn vip_tag_to_percent(tag: &str) -> Option<f64> {
     let value = tag[3..].parse::<u8>().ok()?;
     if (1..=99).contains(&value) {
         Some(value as f64)
-    } else {
-        None
-    }
-}
-
-fn item_off_tag_to_percent(tag: &str) -> Option<f64> {
-    let normalized = tag.trim().to_lowercase();
-    if !normalized.ends_with(" off") {
-        return None;
-    }
-    let value = normalized
-        .trim_end_matches(" off")
-        .trim()
-        .parse::<f64>()
-        .ok()?;
-    if (0.0..=100.0).contains(&value) {
-        Some(value)
     } else {
         None
     }
