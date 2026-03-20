@@ -1060,6 +1060,13 @@ async function persistConfig(
               type: "multi_line_text_field",
               value: chunk,
             });
+            runtimeMirrorMetafields.push({
+              ownerId: cleanedShopOwnerId,
+              namespace: SHOP_RUNTIME_MIRROR_NAMESPACE,
+              key: `${SHOP_RUNTIME_MIRROR_CHUNK_KEY_PREFIX}${idx + 1}`,
+              type: "multi_line_text_field",
+              value: chunk,
+            });
           });
           runtimeMirrorMetafields.push({
             ownerId: cleanedShopOwnerId,
