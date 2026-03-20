@@ -266,35 +266,30 @@ impl Default for RuntimeConfig {
 fn cart_lines_discounts_generate_run(
     input: schema::cart_lines_discounts_generate_run::Input,
 ) -> Result<schema::CartLinesDiscountsGenerateRunResult> {
-    let discount = input.discount();
-    let app_function_config_metafield_json = input
-        .discount()
-        .app_function_config_metafield()
+    let shop = input.shop();
+    let shop_runtime_config_metafield_json = shop
+        .runtime_config_metafield()
         .map(|metafield| metafield.value())
         .map(|value| value.as_str());
-    let app_function_config_chunk_values = [
-        discount
-            .app_function_config_part_1_metafield()
+    let shop_runtime_config_chunk_values = [
+        shop.runtime_config_part_1_metafield()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
-        discount
-            .app_function_config_part_2_metafield()
+        shop.runtime_config_part_2_metafield()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
-        discount
-            .app_function_config_part_3_metafield()
+        shop.runtime_config_part_3_metafield()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
-        discount
-            .app_function_config_part_4_metafield()
+        shop.runtime_config_part_4_metafield()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
     ];
+    // Runtime config is sourced from the shop-level smart_discount_engine chunks.
     let metafield_json = resolve_runtime_config_json(
-        app_function_config_metafield_json,
-        &app_function_config_chunk_values,
+        shop_runtime_config_metafield_json,
+        &shop_runtime_config_chunk_values,
     );
-    let use_tag_item_fallback = metafield_json.is_none();
 
     let config = runtime_config(metafield_json.as_deref());
 
@@ -444,16 +439,6 @@ fn cart_lines_discounts_generate_run(
             let normalized_pid = normalize_product_id(variant.product().id());
             if let Some(percent) = product_item_percents.get(&normalized_pid) {
                 item_percent = item_percent.max(*percent);
-            }
-            if use_tag_item_fallback {
-                for tag_match in variant.product().has_tags().iter() {
-                    if !*tag_match.has_tag() {
-                        continue;
-                    }
-                    if let Some(percent) = item_off_tag_to_percent(tag_match.tag()) {
-                        item_percent = item_percent.max(percent);
-                    }
-                }
             }
             for rule in hvac_active_rules.iter() {
                 let rule_percent_qty = *rule.percent_target_qty_by_line.get(&line_id).unwrap_or(&0);
@@ -931,23 +916,6 @@ fn vip_tag_to_percent(tag: &str) -> Option<f64> {
     let value = tag[3..].parse::<u8>().ok()?;
     if (1..=99).contains(&value) {
         Some(value as f64)
-    } else {
-        None
-    }
-}
-
-fn item_off_tag_to_percent(tag: &str) -> Option<f64> {
-    let normalized = tag.trim().to_lowercase();
-    if !normalized.ends_with(" off") {
-        return None;
-    }
-    let value = normalized
-        .trim_end_matches(" off")
-        .trim()
-        .parse::<f64>()
-        .ok()?;
-    if (0.0..=100.0).contains(&value) {
-        Some(value)
     } else {
         None
     }
