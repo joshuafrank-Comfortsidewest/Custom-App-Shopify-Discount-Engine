@@ -1225,6 +1225,8 @@ async function fetchCollectionProductIds(admin: any, collectionId: string): Prom
   if (!collectionId) return [];
   const ids: string[] = [];
   let after: string | null = null;
+  let retryCount = 0;
+  const maxRetries = 3;
   while (true) {
     const response: any = await admin.graphql(
       `#graphql
@@ -1239,11 +1241,27 @@ async function fetchCollectionProductIds(admin: any, collectionId: string): Prom
       { variables: { id: collectionId, after } },
     );
     const json: any = await response.json();
+    const graphQlErrors: string[] = Array.isArray(json?.errors)
+      ? json.errors.map((e: any) => String(e?.message ?? "GraphQL error"))
+      : [];
+    if (graphQlErrors.length > 0) {
+      const joined = graphQlErrors.join(" | ");
+      const isRetryable = /throttl|rate limit|timeout|internal|temporar/i.test(joined);
+      if (isRetryable && retryCount < maxRetries) {
+        retryCount += 1;
+        await new Promise((resolve) => setTimeout(resolve, retryCount * 300));
+        continue;
+      }
+      throw new Error(`Failed loading collection products: ${joined}`);
+    }
     const block: any = json?.data?.collection?.products;
-    if (!block) break;
+    if (!block) {
+      throw new Error("Failed loading collection products: collection missing or inaccessible");
+    }
     for (const n of block.nodes ?? []) if (n?.id) ids.push(String(n.id));
     if (!block.pageInfo?.hasNextPage) break;
     after = block.pageInfo.endCursor ?? null;
+    retryCount = 0;
   }
   return ids;
 }
@@ -1804,41 +1822,53 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   }
   const ruleCount = toNum(fd.get("item_rule_count"), 0);
   const hasItemInputs = fd.has("item_rule_collection_0") || ruleCount === 0;
-  const item_collection_rules = itemRulesFromJson
-    ? await Promise.all(
-        itemRulesFromJson
-          .filter((r) => r.collection_id && Number.isFinite(r.percent) && r.percent > 0)
-          .map(async (r) => ({
-            collection_id: r.collection_id,
-            percent: r.percent,
-            product_ids: await fetchCollectionProductIds(admin, r.collection_id),
-          })),
-      )
-    : hasItemInputs
-      ? await (async () => {
-          const rules = [];
-          for (let i = 0; i < ruleCount; i += 1) {
-            const collection_id = String(fd.get(`item_rule_collection_${i}`) ?? "").trim();
-            const percent = toNum(fd.get(`item_rule_percent_${i}`), 0);
-            if (collection_id && percent > 0) rules.push({ collection_id, percent });
-          }
-          return Promise.all(
-            rules.map(async (r) => ({
-              ...r,
-              product_ids: await fetchCollectionProductIds(admin, r.collection_id),
-            })),
-          );
-        })()
-      : current.item_collection_rules;
-
   const hasOtherDiscountInputs =
     fd.has("collection_spend_collection_id") || fd.has("collection_spend_amount_off");
   const csCollectionId = hasOtherDiscountInputs
     ? String(fd.get("collection_spend_collection_id") ?? "").trim()
     : current.collection_spend_rule.collection_id;
-  const csProductIds = csCollectionId
-    ? await fetchCollectionProductIds(admin, csCollectionId)
-    : [];
+  let item_collection_rules = current.item_collection_rules;
+  let csProductIds = current.collection_spend_rule.product_ids;
+  try {
+    item_collection_rules = itemRulesFromJson
+      ? await Promise.all(
+          itemRulesFromJson
+            .filter((r) => r.collection_id && Number.isFinite(r.percent) && r.percent > 0)
+            .map(async (r) => ({
+              collection_id: r.collection_id,
+              percent: r.percent,
+              product_ids: await fetchCollectionProductIds(admin, r.collection_id),
+            })),
+        )
+      : hasItemInputs
+        ? await (async () => {
+            const rules = [];
+            for (let i = 0; i < ruleCount; i += 1) {
+              const collection_id = String(fd.get(`item_rule_collection_${i}`) ?? "").trim();
+              const percent = toNum(fd.get(`item_rule_percent_${i}`), 0);
+              if (collection_id && percent > 0) rules.push({ collection_id, percent });
+            }
+            return Promise.all(
+              rules.map(async (r) => ({
+                ...r,
+                product_ids: await fetchCollectionProductIds(admin, r.collection_id),
+              })),
+            );
+          })()
+        : current.item_collection_rules;
+
+    csProductIds = csCollectionId
+      ? await fetchCollectionProductIds(admin, csCollectionId)
+      : current.collection_spend_rule.product_ids;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed loading collection products";
+    console.error("[discount-save] collection sync failed", { message, shop: session.shop, configOwnerId });
+    return {
+      ok: false,
+      errors: [{ field: ["collectionSync"], message }],
+      conflicts: detectConflicts(current),
+    };
+  }
   const mappedRows = await prisma.hvacSkuMapping.findMany({
     where: { shop: session.shop, mappedProductId: { not: null } },
     select: { sourceType: true, sourceSku: true, mappedProductId: true },
