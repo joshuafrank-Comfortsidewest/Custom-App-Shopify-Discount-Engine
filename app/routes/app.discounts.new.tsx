@@ -73,6 +73,8 @@ async function resolveFunctionId(admin: any): Promise<{ functionId: string | nul
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
+  const startsAt = new Date().toISOString();
+  const endsAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 365 * 10).toISOString();
 
   const resolved = await resolveFunctionId(admin);
   const functionId = resolved.functionId ?? "";
@@ -109,7 +111,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             title: `Smart Discount ${Date.now()}`,
             functionId,
             discountClasses: ["PRODUCT", "SHIPPING"],
-            startsAt: new Date().toISOString(),
+            startsAt,
+            endsAt,
             combinesWith: {
               orderDiscounts: true,
               productDiscounts: true,

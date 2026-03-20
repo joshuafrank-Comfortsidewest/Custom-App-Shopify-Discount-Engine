@@ -68,6 +68,9 @@ async function resolveFunctionCandidates(admin: any, preferred: string): Promise
 }
 
 async function tryCreateDiscount(admin: any, functionId: string) {
+  const startsAt = new Date().toISOString();
+  const endsAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 365 * 10).toISOString();
+
   const response = await admin.graphql(
     `#graphql
       mutation CreateAutomaticAppDiscount($automaticAppDiscount: DiscountAutomaticAppInput!) {
@@ -90,7 +93,8 @@ async function tryCreateDiscount(admin: any, functionId: string) {
           title: `Smart Discount ${Date.now()}`,
           functionId,
           discountClasses: ["PRODUCT", "SHIPPING"],
-          startsAt: new Date().toISOString(),
+          startsAt,
+          endsAt,
           combinesWith: {
             orderDiscounts: true,
             productDiscounts: true,
