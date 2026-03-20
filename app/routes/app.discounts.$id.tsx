@@ -752,9 +752,10 @@ function buildRuntimeFunctionConfig(config: DiscountConfig) {
         .map((rule) => ({
           collection_id: String(rule?.collection_id ?? "").trim(),
           percent: normalizeNum(rule?.percent, 0),
-          product_ids: compactProductIds(rule?.product_ids),
+          // Keep runtime payload compact; item-rule matching is handled by product promo tags in function input.
+          product_ids: [],
         }))
-        .filter((rule) => rule.percent > 0 && rule.product_ids.length > 0)
+        .filter((rule) => rule.percent > 0)
     : [];
 
   const runtimeCollectionSpendRule = otherRuleEnabled

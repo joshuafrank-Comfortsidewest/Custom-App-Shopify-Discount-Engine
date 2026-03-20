@@ -266,25 +266,25 @@ impl Default for RuntimeConfig {
 fn cart_lines_discounts_generate_run(
     input: schema::cart_lines_discounts_generate_run::Input,
 ) -> Result<schema::CartLinesDiscountsGenerateRunResult> {
-    let shop = input.shop();
-    let runtime_config_metafield_json = shop
+    let discount = input.discount();
+    let runtime_config_metafield_json = discount
         .runtime_config_metafield()
         .map(|metafield| metafield.value())
         .map(|value| value.to_string());
     let runtime_config_chunk_values = [
-        shop
+        discount
             .runtime_config_part_1_metafield()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
-        shop
+        discount
             .runtime_config_part_2_metafield()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
-        shop
+        discount
             .runtime_config_part_3_metafield()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
-        shop
+        discount
             .runtime_config_part_4_metafield()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
@@ -294,7 +294,6 @@ fn cart_lines_discounts_generate_run(
         &runtime_config_chunk_values,
     );
     let parsed_config = parse_runtime_config(runtime_config_json.as_deref());
-    let use_tag_item_fallback = parsed_config.is_none();
     let config = parsed_config.unwrap_or_default();
 
     let entered_codes: Vec<String> = input
@@ -435,14 +434,12 @@ fn cart_lines_discounts_generate_run(
             if let Some(percent) = product_item_percents.get(&normalized_pid) {
                 item_percent = item_percent.max(*percent);
             }
-            if use_tag_item_fallback {
-                for tag_match in variant.product().has_tags().iter() {
-                    if !*tag_match.has_tag() {
-                        continue;
-                    }
-                    if let Some(percent) = item_off_tag_to_percent(tag_match.tag()) {
-                        item_percent = item_percent.max(percent);
-                    }
+            for tag_match in variant.product().has_tags().iter() {
+                if !*tag_match.has_tag() {
+                    continue;
+                }
+                if let Some(percent) = item_off_tag_to_percent(tag_match.tag()) {
+                    item_percent = item_percent.max(percent);
                 }
             }
             for rule in hvac_active_rules.iter() {
