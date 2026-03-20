@@ -1,96 +1,15 @@
 query Input {
-  enteredDiscountCodes {
-    code
-  }
   cart {
-    buyerIdentity {
-      customer {
-        numberOfOrders
-        hasTags(
-          tags: [
-            "VIP3"
-            "VIP4"
-            "VIP5"
-            "VIP6"
-            "VIP7"
-            "VIP8"
-            "VIP9"
-            "VIP10"
-            "VIP11"
-            "VIP12"
-            "VIP13"
-            "VIP14"
-            "VIP15"
-            "VIP16"
-            "VIP17"
-            "VIP18"
-            "VIP19"
-            "VIP20"
-            "VIP21"
-            "VIP22"
-            "VIP23"
-            "VIP24"
-            "VIP25"
-          ]
-        ) {
-          tag
-          hasTag
-        }
-      }
-    }
-    cost {
-      subtotalAmount {
-        amount
-      }
-    }
     lines {
       id
-      quantity
       cost {
         subtotalAmount {
           amount
         }
       }
-      merchandise {
-        __typename
-        ... on ProductVariant {
-          product {
-            id
-          }
-        }
-      }
     }
   }
-  shop {
-    runtimeConfigMetafield: metafield(
-      namespace: "smart_discount_engine"
-      key: "config"
-    ) {
-      value
-    }
-    runtimeConfigPart1Metafield: metafield(
-      namespace: "smart_discount_engine"
-      key: "config-part-1"
-    ) {
-      value
-    }
-    runtimeConfigPart2Metafield: metafield(
-      namespace: "smart_discount_engine"
-      key: "config-part-2"
-    ) {
-      value
-    }
-    runtimeConfigPart3Metafield: metafield(
-      namespace: "smart_discount_engine"
-      key: "config-part-3"
-    ) {
-      value
-    }
-    runtimeConfigPart4Metafield: metafield(
-      namespace: "smart_discount_engine"
-      key: "config-part-4"
-    ) {
-      value
-    }
+  discount {
+    discountClasses
   }
 }

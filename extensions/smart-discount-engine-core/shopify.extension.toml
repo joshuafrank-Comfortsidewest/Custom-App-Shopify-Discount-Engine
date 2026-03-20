@@ -17,10 +17,6 @@ description = "t:description"
   input_query = "src/cart_delivery_options_discounts_generate_run.graphql"
   export = "cart_delivery_options_discounts_generate_run"
 
-  [extensions.ui.paths]
-  create = "/app/discounts/new"
-  details = "/app/discounts/:id"
-
   [extensions.build]
   command = "cargo build --target=wasm32-unknown-unknown --release"
   path = "target/wasm32-unknown-unknown/release/smart-discount-engine-core.wasm"

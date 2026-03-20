@@ -1,3 +1,3 @@
-import { flatRoutes } from "@react-router/fs-routes";
+import { flatRoutes } from "@remix-run/fs-routes";
 
 export default flatRoutes();

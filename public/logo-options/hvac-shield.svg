@@ -1,8 +1,0 @@
-﻿<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="HVAC Shield logo">
-  <rect x="32" y="32" width="448" height="448" rx="96" fill="#111827"/>
-  <path d="M256 96l124 48v106c0 74-44 138-124 176-80-38-124-102-124-176V144z" fill="#f8fafc"/>
-  <path d="M256 138v248c60-32 88-78 88-136v-78z" fill="#ef4444"/>
-  <path d="M256 138l-88 34v78c0 58 28 104 88 136z" fill="#0ea5e9"/>
-  <path d="M226 236l30-50 30 50-30 50z" fill="#fff"/>
-  <circle cx="256" cy="236" r="12" fill="#111827"/>
-</svg>
