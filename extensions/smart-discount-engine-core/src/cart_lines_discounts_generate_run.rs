@@ -294,15 +294,14 @@ fn cart_lines_discounts_generate_run(
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
     ];
-    let discount_metafield_json = shop_runtime_app_config_metafield_json
-        .or(shop_runtime_legacy_config_metafield_json)
-        .or_else(|| {
-            resolve_runtime_config_json(
-                app_function_config_metafield_json,
-                &app_function_config_chunk_values,
-            )
-        });
-    let config = parse_runtime_config(discount_metafield_json.as_deref()).unwrap_or_default();
+    let discount_runtime_config_json = resolve_runtime_config_json(
+        app_function_config_metafield_json,
+        &app_function_config_chunk_values,
+    );
+    let config = parse_runtime_config(discount_runtime_config_json.as_deref())
+        .or_else(|| parse_runtime_config(shop_runtime_app_config_metafield_json.as_deref()))
+        .or_else(|| parse_runtime_config(shop_runtime_legacy_config_metafield_json.as_deref()))
+        .unwrap_or_default();
 
     let entered_codes: Vec<String> = input
         .entered_discount_codes()
