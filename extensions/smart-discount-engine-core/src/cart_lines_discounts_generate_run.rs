@@ -267,64 +267,45 @@ fn cart_lines_discounts_generate_run(
     input: schema::cart_lines_discounts_generate_run::Input,
 ) -> Result<schema::CartLinesDiscountsGenerateRunResult> {
     let discount = input.discount();
-    let runtime_config_metafield_json = discount
-        .runtime_config_metafield()
+    let app_function_config_metafield_json = input
+        .discount()
+        .app_function_config_metafield()
         .map(|metafield| metafield.value())
-        .map(|value| value.to_string());
-    let runtime_config_chunk_values = [
+        .map(|value| value.as_str());
+    let app_function_config_chunk_values = [
         discount
-            .runtime_config_part_1_metafield()
+            .app_function_config_part_1_metafield()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
         discount
-            .runtime_config_part_2_metafield()
+            .app_function_config_part_2_metafield()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
         discount
-            .runtime_config_part_3_metafield()
+            .app_function_config_part_3_metafield()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
         discount
-            .runtime_config_part_4_metafield()
+            .app_function_config_part_4_metafield()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
     ];
-
-    log!(
-        "[sde-checkout-config-sources] discount_primary={} discount_chunks={}",
-        has_non_empty_value(runtime_config_metafield_json.as_deref()),
-        non_empty_chunk_count(&runtime_config_chunk_values),
+    let metafield_json = resolve_runtime_config_json(
+        app_function_config_metafield_json,
+        &app_function_config_chunk_values,
     );
+    let use_tag_item_fallback = metafield_json.is_none();
 
-    let (config, runtime_config_source, runtime_config_bytes) = if let Some((parsed, bytes)) = try_resolve_and_parse_runtime_config(
-        runtime_config_metafield_json.as_deref(),
-        &runtime_config_chunk_values,
-    ) {
-        (parsed, "discount:$app/function-configuration", bytes)
-    } else {
-        log!(
-            "[sde-checkout-config] source=missing bytes=0 parse_ok=false item_rules=0 item_toggle=false hvac_enabled=false hvac_rules=0 other_enabled=false other_products=0"
-        );
+    let config = runtime_config(metafield_json.as_deref());
+
+    let has_product_discount_class = input
+        .discount()
+        .discount_classes()
+        .contains(&schema::DiscountClass::Product);
+
+    if !has_product_discount_class {
         return Ok(schema::CartLinesDiscountsGenerateRunResult { operations: vec![] });
-    };
-
-    let runtime_item_rule_products: usize = config
-        .item_collection_rules
-        .iter()
-        .map(|rule| rule.product_ids.len())
-        .sum();
-    log!(
-        "[sde-checkout-config] source={} bytes={} item_rules={} item_rule_products={} item_toggle={} hvac_enabled={} hvac_rules={} other_enabled={} other_products={}",
-        runtime_config_source,
-        runtime_config_bytes,
-        config.item_collection_rules.len(),
-        runtime_item_rule_products,
-        config.toggles.item_collection_enabled,
-        config.hvac_rule.enabled,
-        config.hvac_rule.combination_rules.len(),
-        config.collection_spend_rule.enabled,
-        config.collection_spend_rule.product_ids.len(),
-    );
+    }
 
     let entered_codes: Vec<String> = input
         .entered_discount_codes()
@@ -453,9 +434,6 @@ fn cart_lines_discounts_generate_run(
         let fixed_amount_per_item = config.collection_spend_rule.amount_off_per_step.max(0.0);
         let line_id = line.id().to_string();
         let line_subtotal = line.cost().subtotal_amount().amount().0;
-        let mut line_product_id = String::new();
-        let mut line_in_item_rule_map = false;
-        let mut line_hvac_rule_matches: Vec<String> = vec![];
         let line_unit_price = if line_qty > 0 {
             line_subtotal / (line_qty as f64)
         } else {
@@ -464,10 +442,18 @@ fn cart_lines_discounts_generate_run(
 
         if let Merchandise::ProductVariant(variant) = line.merchandise() {
             let normalized_pid = normalize_product_id(variant.product().id());
-            line_product_id = normalized_pid.clone();
-            line_in_item_rule_map = product_item_percents.contains_key(&normalized_pid);
             if let Some(percent) = product_item_percents.get(&normalized_pid) {
                 item_percent = item_percent.max(*percent);
+            }
+            if use_tag_item_fallback {
+                for tag_match in variant.product().has_tags().iter() {
+                    if !*tag_match.has_tag() {
+                        continue;
+                    }
+                    if let Some(percent) = item_off_tag_to_percent(tag_match.tag()) {
+                        item_percent = item_percent.max(percent);
+                    }
+                }
             }
             for rule in hvac_active_rules.iter() {
                 let rule_percent_qty = *rule.percent_target_qty_by_line.get(&line_id).unwrap_or(&0);
@@ -488,57 +474,30 @@ fn cart_lines_discounts_generate_run(
                             (fixed_on_line as f64) * rule.amount_off_outdoor_per_bundle;
                     }
                 }
-                if rule_percent_qty > 0 || fixed_on_line > 0 {
-                    let name = if rule.name.trim().is_empty() {
-                        "unnamed".to_string()
-                    } else {
-                        rule.name.clone()
-                    };
-                    if !line_hvac_rule_matches.contains(&name) {
-                        line_hvac_rule_matches.push(name);
-                    }
-                }
             }
             if collection_spend_products.contains(&normalized_pid) {
                 fixed_qty = *selected_other_units_by_line.get(&line_id).unwrap_or(&0);
             }
         }
 
-        // Guard against invalid overlapping targets: cap all fixed-qty discounts to line quantity.
-        let hvac_fixed_exclusive_qty_capped = hvac_fixed_exclusive_qty.max(0).min(line_qty.max(0));
-        let mut hvac_fixed_stackable_qty_capped = hvac_fixed_stackable_qty.max(0);
-        let mut fixed_qty_capped = fixed_qty.max(0);
-
-        // If exclusive fixed applies, prefer it and disable stackable fixed on the same line.
-        if hvac_fixed_exclusive_qty_capped > 0 {
-            hvac_fixed_stackable_qty_capped = 0;
-            hvac_fixed_stackable_amount_total = 0.0;
-        } else {
-            hvac_fixed_stackable_qty_capped =
-                hvac_fixed_stackable_qty_capped.min(line_qty.max(0));
-        }
-
-        let fixed_slots_left = (line_qty - hvac_fixed_exclusive_qty_capped - hvac_fixed_stackable_qty_capped).max(0);
-        fixed_qty_capped = fixed_qty_capped.min(fixed_slots_left);
-
         let base_percent_candidate = order_level_percent.max(item_percent);
         let hvac_percent_candidate = base_percent_candidate.max(hvac_percent_exclusive_best);
         let current_promo_source = current_promo_attribution(&discount_percents, item_percent);
-        if hvac_fixed_exclusive_qty_capped > 0 {
+        if hvac_fixed_exclusive_qty > 0 {
             let hvac_fixed_per_item =
-                hvac_fixed_exclusive_amount_total / (hvac_fixed_exclusive_qty.max(1) as f64);
+                hvac_fixed_exclusive_amount_total / (hvac_fixed_exclusive_qty as f64);
             let hvac_fixed_per_item_capped = hvac_fixed_per_item.min(line_unit_price).max(0.0);
             candidates.push(schema::ProductDiscountCandidate {
                 targets: vec![schema::ProductDiscountCandidateTarget::CartLine(
                     schema::CartLineTarget {
                         id: line.id().clone(),
-                        quantity: Some(hvac_fixed_exclusive_qty_capped),
+                        quantity: Some(hvac_fixed_exclusive_qty),
                     },
                 )],
                 message: Some(format!(
                     "Bundle discount: ${} off on {} outdoor unit(s)",
                     fmt_percent(hvac_fixed_per_item_capped),
-                    hvac_fixed_exclusive_qty_capped
+                    hvac_fixed_exclusive_qty
                 )),
                 value: schema::ProductDiscountCandidateValue::FixedAmount(
                     schema::ProductDiscountCandidateFixedAmount {
@@ -550,9 +509,9 @@ fn cart_lines_discounts_generate_run(
             });
         }
 
-        if hvac_fixed_stackable_qty_capped > 0 {
+        if hvac_fixed_stackable_qty > 0 {
             let hvac_fixed_per_item =
-                hvac_fixed_stackable_amount_total / (hvac_fixed_stackable_qty.max(1) as f64);
+                hvac_fixed_stackable_amount_total / (hvac_fixed_stackable_qty as f64);
             let after_hvac_price = (line_unit_price - hvac_fixed_per_item).max(0.0);
             // Apply selected percentage after HVAC fixed amount:
             // (unit_price - hvac_amount) -> then percentage.
@@ -564,20 +523,20 @@ fn cart_lines_discounts_generate_run(
                     "Bundle discount: ${} off + {}% on {} outdoor unit(s)",
                     fmt_percent(hvac_fixed_per_item),
                     fmt_percent(hvac_percent_candidate),
-                    hvac_fixed_stackable_qty_capped
+                    hvac_fixed_stackable_qty
                 )
             } else {
                 format!(
                     "Bundle discount: ${} off on {} outdoor unit(s)",
                     fmt_percent(hvac_fixed_per_item.min(line_unit_price).max(0.0)),
-                    hvac_fixed_stackable_qty_capped
+                    hvac_fixed_stackable_qty
                 )
             };
             candidates.push(schema::ProductDiscountCandidate {
                 targets: vec![schema::ProductDiscountCandidateTarget::CartLine(
                     schema::CartLineTarget {
                         id: line.id().clone(),
-                        quantity: Some(hvac_fixed_stackable_qty_capped),
+                        quantity: Some(hvac_fixed_stackable_qty),
                     },
                 )],
                 message: Some(message),
@@ -591,8 +550,8 @@ fn cart_lines_discounts_generate_run(
             });
         }
 
-        let hvac_fixed_qty_total = hvac_fixed_stackable_qty_capped + hvac_fixed_exclusive_qty_capped;
-        let remaining_qty: i32 = (line_qty - fixed_qty_capped - hvac_fixed_qty_total).max(0);
+        let hvac_fixed_qty_total = hvac_fixed_stackable_qty + hvac_fixed_exclusive_qty;
+        let remaining_qty: i32 = (line_qty - fixed_qty - hvac_fixed_qty_total).max(0);
         let hvac_percent_qty = remaining_qty.min(hvac_percent_units_requested.max(0));
         let non_hvac_percent_qty = (remaining_qty - hvac_percent_qty).max(0);
         let bundle_percent_contributed =
@@ -606,18 +565,18 @@ fn cart_lines_discounts_generate_run(
             current_promo_source.clone()
         };
 
-        if fixed_qty_capped > 0 && fixed_amount_per_item > 0.0 {
+        if fixed_qty > 0 && fixed_amount_per_item > 0.0 {
             candidates.push(schema::ProductDiscountCandidate {
                 targets: vec![schema::ProductDiscountCandidateTarget::CartLine(
                     schema::CartLineTarget {
                         id: line.id().clone(),
-                        quantity: Some(fixed_qty_capped),
+                        quantity: Some(fixed_qty),
                     },
                 )],
                 message: Some(format!(
                     "Accessories discount: ${} off on {} item(s)",
                     fmt_percent(fixed_amount_per_item),
-                    fixed_qty_capped
+                    fixed_qty
                 )),
                 value: schema::ProductDiscountCandidateValue::FixedAmount(
                     schema::ProductDiscountCandidateFixedAmount {
@@ -672,37 +631,7 @@ fn cart_lines_discounts_generate_run(
                 associated_discount_code: None,
             });
         }
-
-        if !line_product_id.is_empty() {
-            let hvac_match_names = if line_hvac_rule_matches.is_empty() {
-                "none".to_string()
-            } else {
-                line_hvac_rule_matches.join("|")
-            };
-            log!(
-                "[sde-checkout-line] line_id={} product_id={} qty={} in_item_rule_map={} item_percent={} base_percent={} hvac_percent_candidate={} hvac_percent_qty={} hvac_fixed_stack_qty={} hvac_fixed_exclusive_qty={} hvac_rule_match_count={} hvac_rule_matches={} other_fixed_qty={}",
-                line_id,
-                line_product_id,
-                line_qty,
-                line_in_item_rule_map,
-                fmt_percent(item_percent),
-                fmt_percent(base_percent_candidate),
-                fmt_percent(hvac_percent_candidate),
-                hvac_percent_qty,
-                hvac_fixed_stackable_qty_capped,
-                hvac_fixed_exclusive_qty_capped,
-                line_hvac_rule_matches.len(),
-                hvac_match_names,
-                fixed_qty_capped,
-            );
-        }
     }
-
-    log!(
-        "[sde-checkout-result] line_count={} candidate_count={}",
-        input.cart().lines().len(),
-        candidates.len(),
-    );
 
     if candidates.is_empty() {
         return Ok(schema::CartLinesDiscountsGenerateRunResult { operations: vec![] });
@@ -744,19 +673,18 @@ fn collection_spend_discountable_units(
     }
 
     let mut qty: f64 = 0.0;
-    let mut collection_subtotal: f64 = 0.0;
     for line in input.cart().lines().iter() {
         if let Merchandise::ProductVariant(variant) = line.merchandise() {
             let normalized_pid = normalize_product_id(variant.product().id());
             if product_set.contains(&normalized_pid) {
                 qty += *line.quantity() as f64;
-                collection_subtotal += line.cost().subtotal_amount().amount().0;
             }
         }
     }
 
+    let cart_subtotal = input.cart().cost().subtotal_amount().amount().0;
     compute_collection_spend_units(
-        collection_subtotal,
+        cart_subtotal,
         qty,
         rule.min_collection_qty,
         rule.spend_step_amount,
@@ -766,7 +694,7 @@ fn collection_spend_discountable_units(
 }
 
 fn compute_collection_spend_units(
-    collection_subtotal: f64,
+    cart_subtotal: f64,
     eligible_qty: f64,
     min_collection_qty: f64,
     spend_step_amount: f64,
@@ -778,11 +706,11 @@ fn compute_collection_spend_units(
     }
     let spend_step = spend_step_amount.max(0.01);
     let min_qty = min_collection_qty.max(1.0);
-    if eligible_qty < min_qty || collection_subtotal < spend_step {
+    if eligible_qty < min_qty || cart_subtotal < spend_step {
         return 0;
     }
 
-    let steps = (collection_subtotal / spend_step).floor() as i32;
+    let steps = (cart_subtotal / spend_step).floor() as i32;
     let eligible_units = eligible_qty.floor() as i32;
     let computed_units = steps.min(eligible_units).max(0);
     let max_units = if max_discounted_units_per_order > 0.0 {
@@ -1008,6 +936,23 @@ fn vip_tag_to_percent(tag: &str) -> Option<f64> {
     }
 }
 
+fn item_off_tag_to_percent(tag: &str) -> Option<f64> {
+    let normalized = tag.trim().to_lowercase();
+    if !normalized.ends_with(" off") {
+        return None;
+    }
+    let value = normalized
+        .trim_end_matches(" off")
+        .trim()
+        .parse::<f64>()
+        .ok()?;
+    if (0.0..=100.0).contains(&value) {
+        Some(value)
+    } else {
+        None
+    }
+}
+
 fn bulk_percent(adjusted_subtotal: f64, config: &RuntimeConfig) -> f64 {
     if adjusted_subtotal >= config.bulk15_min {
         config.bulk15_percent
@@ -1022,79 +967,41 @@ fn bulk_percent(adjusted_subtotal: f64, config: &RuntimeConfig) -> f64 {
     }
 }
 
-fn parse_runtime_config(raw_json: Option<&str>) -> Option<RuntimeConfig> {
-    let raw = raw_json?;
-    serde_json::from_str::<RuntimeConfig>(raw).ok().or_else(|| {
-        serde_json::from_str::<String>(raw)
-            .ok()
-            .and_then(|decoded| serde_json::from_str::<RuntimeConfig>(&decoded).ok())
-    })
-}
-
-fn try_resolve_and_parse_runtime_config(
-    primary: Option<&str>,
-    chunks: &[Option<&str>],
-) -> Option<(RuntimeConfig, usize)> {
-    let resolved = resolve_runtime_config_json(primary, chunks)?;
-    let bytes = resolved.len();
-    let parsed = parse_runtime_config(Some(resolved.as_str()))?;
-    Some((parsed, bytes))
-}
-
-fn has_non_empty_value(raw: Option<&str>) -> bool {
-    raw.map(|value| !value.trim().is_empty()).unwrap_or(false)
-}
-
-fn non_empty_chunk_count(chunks: &[Option<&str>]) -> usize {
-    chunks
-        .iter()
-        .filter(|chunk| chunk.map(|value| !value.trim().is_empty()).unwrap_or(false))
-        .count()
+fn runtime_config(raw_json: Option<&str>) -> RuntimeConfig {
+    raw_json
+        .and_then(|raw| serde_json::from_str::<RuntimeConfig>(raw).ok())
+        .unwrap_or_default()
 }
 
 fn resolve_runtime_config_json(primary: Option<&str>, chunks: &[Option<&str>]) -> Option<String> {
-    let decode_json_string = |raw: &str| -> String {
-        serde_json::from_str::<String>(raw).unwrap_or_else(|_| raw.to_string())
-    };
-    let decode_manifest = |raw: &str| -> Option<RuntimeConfigChunkManifest> {
-        serde_json::from_str::<RuntimeConfigChunkManifest>(raw).ok().or_else(|| {
-            serde_json::from_str::<String>(raw)
-                .ok()
-                .and_then(|decoded| serde_json::from_str::<RuntimeConfigChunkManifest>(&decoded).ok())
-        })
-    };
-
     if let Some(raw) = primary {
-        if let Some(manifest) = decode_manifest(raw) {
+        if let Ok(manifest) = serde_json::from_str::<RuntimeConfigChunkManifest>(raw) {
             if manifest.chunked {
-                if manifest.parts == 0 || manifest.parts > chunks.len() {
-                    return None;
-                }
                 let mut joined = String::new();
-                for idx in 0..manifest.parts {
-                    let Some(part) = chunks[idx] else {
-                        return None;
-                    };
-                    let decoded_part = decode_json_string(part);
-                    if decoded_part.is_empty() {
-                        return None;
+                let parts = manifest.parts.min(chunks.len());
+                for idx in 0..parts {
+                    if let Some(part) = chunks[idx] {
+                        if !part.is_empty() {
+                            joined.push_str(part);
+                        }
                     }
-                    joined.push_str(&decoded_part);
                 }
-                return Some(joined);
+                return if joined.is_empty() {
+                    None
+                } else {
+                    Some(joined)
+                };
             }
         }
-        let decoded_primary = decode_json_string(raw);
-        if !decoded_primary.is_empty() {
-            return Some(decoded_primary);
+        if !raw.is_empty() {
+            return Some(raw.to_string());
         }
     }
 
     let mut fallback = String::new();
     for part in chunks.iter().flatten() {
-        let decoded_part = decode_json_string(part);
-        if !decoded_part.is_empty() {
-            fallback.push_str(&decoded_part);
+        if !part.is_empty() {
+            fallback.push_str(part);
         }
     }
     if fallback.is_empty() {
