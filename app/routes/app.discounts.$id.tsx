@@ -2428,6 +2428,16 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const runtimeHvacRules = Array.isArray(runtimePreview?.hvac_rule?.combination_rules)
     ? runtimePreview.hvac_rule.combination_rules
     : [];
+  const runtimeItemRuleDiagnostics = Array.isArray(runtimePreview?.item_collection_rules)
+    ? runtimePreview.item_collection_rules.map((rule: any) => ({
+        collectionId: String(rule?.collection_id ?? "").trim(),
+        percent: Number(rule?.percent ?? 0),
+        productCount: Array.isArray(rule?.product_ids) ? rule.product_ids.length : 0,
+      }))
+    : [];
+  const runtimeItemRule17Diagnostics = runtimeItemRuleDiagnostics.filter(
+    (rule) => Math.abs(Number(rule.percent) - 17) < 0.0001,
+  );
   const runtimeHvacRuleDiagnostics = runtimeHvacRules.slice(0, 8).map((rule: any) => ({
     name: String(rule?.name ?? "").trim(),
     enabled: Boolean(rule?.enabled),
@@ -2435,6 +2445,32 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     indoorCount: Array.isArray(rule?.indoor_product_ids) ? rule.indoor_product_ids.length : 0,
     outdoorCount: Array.isArray(rule?.outdoor_product_ids) ? rule.outdoor_product_ids.length : 0,
   }));
+  const probeHvacPairs = [
+    { indoorProductId: "7992554750067", outdoorProductId: "7992580243571" },
+    { indoorProductId: "7914534076531", outdoorProductId: "7669624406131" },
+  ];
+  const probeHvacPairMatches = probeHvacPairs.map((pair) => {
+    const matchingRules = runtimeHvacRules
+      .filter((rule: any) => {
+        const indoorIds = Array.isArray(rule?.indoor_product_ids) ? rule.indoor_product_ids : [];
+        const outdoorIds = Array.isArray(rule?.outdoor_product_ids) ? rule.outdoor_product_ids : [];
+        const hasIndoor = indoorIds.some((pid: any) => compactProductId(pid) === pair.indoorProductId);
+        const hasOutdoor = outdoorIds.some((pid: any) => compactProductId(pid) === pair.outdoorProductId);
+        return hasIndoor && hasOutdoor;
+      })
+      .map((rule: any) => ({
+        name: String(rule?.name ?? "").trim(),
+        outdoorSku: String(rule?.outdoor_source_sku ?? "").trim(),
+        stackMode: String(rule?.stack_mode ?? "").trim(),
+        percentOff: Number(rule?.percent_off_hvac_products ?? 0),
+        amountOffOutdoor: Number(rule?.amount_off_outdoor_per_bundle ?? 0),
+      }));
+    return {
+      ...pair,
+      matchingRuleCount: matchingRules.length,
+      matchingRules: matchingRules.slice(0, 6),
+    };
+  });
   const probeInHvac = probeProductIds.map((probeProductId) => ({
     productId: probeProductId,
     asIndoor: runtimeHvacRules.some((rule: any) =>
@@ -2474,6 +2510,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     runtimeHvacEnabled: Boolean(runtimePreview?.hvac_rule?.enabled),
     runtimeHvacRuleCount: runtimeHvacRules.length,
     runtimeHvacRuleDiagnostics,
+    runtimeItemRuleDiagnostics: runtimeItemRuleDiagnostics.slice(0, 20),
+    runtimeItemRule17Diagnostics,
+    probeHvacPairMatches,
     runtimePreviewBytes,
   });
 
