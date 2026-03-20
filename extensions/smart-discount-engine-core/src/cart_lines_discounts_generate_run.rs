@@ -289,12 +289,44 @@ fn cart_lines_discounts_generate_run(
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
     ];
-    let runtime_config_json = resolve_runtime_config_json(
+
+    log!(
+        "[sde-checkout-config-sources] shop_legacy_primary={} shop_legacy_chunks={}",
+        has_non_empty_value(runtime_config_metafield_json.as_deref()),
+        non_empty_chunk_count(&runtime_config_chunk_values),
+    );
+
+    let mut runtime_config_source = "default";
+    let mut runtime_config_bytes: usize = 0;
+
+    let config = if let Some((parsed, bytes)) = try_resolve_and_parse_runtime_config(
         runtime_config_metafield_json.as_deref(),
         &runtime_config_chunk_values,
+    ) {
+        runtime_config_source = "shop:smart_discount_engine/config";
+        runtime_config_bytes = bytes;
+        parsed
+    } else {
+        RuntimeConfig::default()
+    };
+
+    let runtime_item_rule_products: usize = config
+        .item_collection_rules
+        .iter()
+        .map(|rule| rule.product_ids.len())
+        .sum();
+    log!(
+        "[sde-checkout-config] source={} bytes={} item_rules={} item_rule_products={} item_toggle={} hvac_enabled={} hvac_rules={} other_enabled={} other_products={}",
+        runtime_config_source,
+        runtime_config_bytes,
+        config.item_collection_rules.len(),
+        runtime_item_rule_products,
+        config.toggles.item_collection_enabled,
+        config.hvac_rule.enabled,
+        config.hvac_rule.combination_rules.len(),
+        config.collection_spend_rule.enabled,
+        config.collection_spend_rule.product_ids.len(),
     );
-    let parsed_config = parse_runtime_config(runtime_config_json.as_deref());
-    let config = parsed_config.unwrap_or_default();
 
     let entered_codes: Vec<String> = input
         .entered_discount_codes()
@@ -423,6 +455,9 @@ fn cart_lines_discounts_generate_run(
         let fixed_amount_per_item = config.collection_spend_rule.amount_off_per_step.max(0.0);
         let line_id = line.id().to_string();
         let line_subtotal = line.cost().subtotal_amount().amount().0;
+        let mut line_product_id = String::new();
+        let mut line_in_item_rule_map = false;
+        let mut line_hvac_rule_matches: Vec<String> = vec![];
         let line_unit_price = if line_qty > 0 {
             line_subtotal / (line_qty as f64)
         } else {
@@ -431,6 +466,8 @@ fn cart_lines_discounts_generate_run(
 
         if let Merchandise::ProductVariant(variant) = line.merchandise() {
             let normalized_pid = normalize_product_id(variant.product().id());
+            line_product_id = normalized_pid.clone();
+            line_in_item_rule_map = product_item_percents.contains_key(&normalized_pid);
             if let Some(percent) = product_item_percents.get(&normalized_pid) {
                 item_percent = item_percent.max(*percent);
             }
@@ -461,6 +498,16 @@ fn cart_lines_discounts_generate_run(
                             (fixed_on_line as f64) * rule.amount_off_outdoor_per_bundle;
                     }
                 }
+                if rule_percent_qty > 0 || fixed_on_line > 0 {
+                    let name = if rule.name.trim().is_empty() {
+                        "unnamed".to_string()
+                    } else {
+                        rule.name.clone()
+                    };
+                    if !line_hvac_rule_matches.contains(&name) {
+                        line_hvac_rule_matches.push(name);
+                    }
+                }
             }
             if collection_spend_products.contains(&normalized_pid) {
                 fixed_qty = *selected_other_units_by_line.get(&line_id).unwrap_or(&0);
@@ -468,7 +515,7 @@ fn cart_lines_discounts_generate_run(
         }
 
         // Guard against invalid overlapping targets: cap all fixed-qty discounts to line quantity.
-        let mut hvac_fixed_exclusive_qty_capped = hvac_fixed_exclusive_qty.max(0).min(line_qty.max(0));
+        let hvac_fixed_exclusive_qty_capped = hvac_fixed_exclusive_qty.max(0).min(line_qty.max(0));
         let mut hvac_fixed_stackable_qty_capped = hvac_fixed_stackable_qty.max(0);
         let mut fixed_qty_capped = fixed_qty.max(0);
 
@@ -635,7 +682,37 @@ fn cart_lines_discounts_generate_run(
                 associated_discount_code: None,
             });
         }
+
+        if !line_product_id.is_empty() {
+            let hvac_match_names = if line_hvac_rule_matches.is_empty() {
+                "none".to_string()
+            } else {
+                line_hvac_rule_matches.join("|")
+            };
+            log!(
+                "[sde-checkout-line] line_id={} product_id={} qty={} in_item_rule_map={} item_percent={} base_percent={} hvac_percent_candidate={} hvac_percent_qty={} hvac_fixed_stack_qty={} hvac_fixed_exclusive_qty={} hvac_rule_match_count={} hvac_rule_matches={} other_fixed_qty={}",
+                line_id,
+                line_product_id,
+                line_qty,
+                line_in_item_rule_map,
+                fmt_percent(item_percent),
+                fmt_percent(base_percent_candidate),
+                fmt_percent(hvac_percent_candidate),
+                hvac_percent_qty,
+                hvac_fixed_stackable_qty_capped,
+                hvac_fixed_exclusive_qty_capped,
+                line_hvac_rule_matches.len(),
+                hvac_match_names,
+                fixed_qty_capped,
+            );
+        }
     }
+
+    log!(
+        "[sde-checkout-result] line_count={} candidate_count={}",
+        input.cart().lines().len(),
+        candidates.len(),
+    );
 
     if candidates.is_empty() {
         return Ok(schema::CartLinesDiscountsGenerateRunResult { operations: vec![] });
@@ -979,6 +1056,27 @@ fn parse_runtime_config(raw_json: Option<&str>) -> Option<RuntimeConfig> {
             .ok()
             .and_then(|decoded| serde_json::from_str::<RuntimeConfig>(&decoded).ok())
     })
+}
+
+fn try_resolve_and_parse_runtime_config(
+    primary: Option<&str>,
+    chunks: &[Option<&str>],
+) -> Option<(RuntimeConfig, usize)> {
+    let resolved = resolve_runtime_config_json(primary, chunks)?;
+    let bytes = resolved.len();
+    let parsed = parse_runtime_config(Some(resolved.as_str()))?;
+    Some((parsed, bytes))
+}
+
+fn has_non_empty_value(raw: Option<&str>) -> bool {
+    raw.map(|value| !value.trim().is_empty()).unwrap_or(false)
+}
+
+fn non_empty_chunk_count(chunks: &[Option<&str>]) -> usize {
+    chunks
+        .iter()
+        .filter(|chunk| chunk.map(|value| !value.trim().is_empty()).unwrap_or(false))
+        .count()
 }
 
 fn resolve_runtime_config_json(primary: Option<&str>, chunks: &[Option<&str>]) -> Option<String> {
