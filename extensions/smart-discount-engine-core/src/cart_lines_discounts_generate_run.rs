@@ -266,40 +266,31 @@ impl Default for RuntimeConfig {
 fn cart_lines_discounts_generate_run(
     input: schema::cart_lines_discounts_generate_run::Input,
 ) -> Result<schema::CartLinesDiscountsGenerateRunResult> {
-    let discount = input.discount();
     let shop = input.shop();
     let shop_runtime_app_config_metafield_json = shop
         .runtime_config_app_metafield()
         .map(|metafield| metafield.value())
         .map(|value| value.to_string());
+    let shop_runtime_app_config_chunk_values = [
+        shop.runtime_config_app_part_1_metafield()
+            .map(|metafield| metafield.value())
+            .map(|value| value.as_str()),
+        shop.runtime_config_app_part_2_metafield()
+            .map(|metafield| metafield.value())
+            .map(|value| value.as_str()),
+        shop.runtime_config_app_part_3_metafield()
+            .map(|metafield| metafield.value())
+            .map(|value| value.as_str()),
+    ];
     let shop_runtime_legacy_config_metafield_json = shop
         .runtime_config_legacy_metafield()
         .map(|metafield| metafield.value())
         .map(|value| value.to_string());
-    let app_function_config_metafield_json = discount
-        .app_function_config_metafield()
-        .map(|metafield| metafield.value())
-        .map(|value| value.as_str());
-    let app_function_config_chunk_values = [
-        discount
-            .app_function_config_part_1_metafield()
-            .map(|metafield| metafield.value())
-            .map(|value| value.as_str()),
-        discount
-            .app_function_config_part_2_metafield()
-            .map(|metafield| metafield.value())
-            .map(|value| value.as_str()),
-        discount
-            .app_function_config_part_3_metafield()
-            .map(|metafield| metafield.value())
-            .map(|value| value.as_str()),
-    ];
-    let discount_runtime_config_json = resolve_runtime_config_json(
-        app_function_config_metafield_json,
-        &app_function_config_chunk_values,
+    let shop_runtime_app_config_json = resolve_runtime_config_json(
+        shop_runtime_app_config_metafield_json.as_deref(),
+        &shop_runtime_app_config_chunk_values,
     );
-    let config = parse_runtime_config(discount_runtime_config_json.as_deref())
-        .or_else(|| parse_runtime_config(shop_runtime_app_config_metafield_json.as_deref()))
+    let config = parse_runtime_config(shop_runtime_app_config_json.as_deref())
         .or_else(|| parse_runtime_config(shop_runtime_legacy_config_metafield_json.as_deref()))
         .unwrap_or_default();
 

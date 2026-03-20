@@ -669,6 +669,7 @@ const ADMIN_CONFIG_CHUNK_KEY_PREFIX = "admin-configuration-part-";
 const ADMIN_CONFIG_MAX_CHUNKS = 8;
 const SHOP_RUNTIME_MIRROR_NAMESPACE = "smart_discount_engine";
 const SHOP_RUNTIME_MIRROR_KEY = "config";
+const SHOP_RUNTIME_MIRROR_CHUNK_KEY_PREFIX = "config-part-";
 const SHOP_RUNTIME_APP_MIRROR_NAMESPACE = "$app:smart_discount_engine";
 const RUNTIME_OWNER_ID_PATTERN =
   /^gid:\/\/shopify\/Discount(?:Automatic|Code)Node\/\d+$/;
@@ -1024,22 +1025,51 @@ async function persistConfig(
       }
     }
     if (cleanedShopOwnerId && runtimePayload) {
-      runtimeMirrorMetafields.push(
-        {
-          ownerId: cleanedShopOwnerId,
-          namespace: SHOP_RUNTIME_APP_MIRROR_NAMESPACE,
-          key: SHOP_RUNTIME_MIRROR_KEY,
-          type: "json",
-          value: runtimePayload,
-        },
-        {
-          ownerId: cleanedShopOwnerId,
-          namespace: SHOP_RUNTIME_MIRROR_NAMESPACE,
-          key: SHOP_RUNTIME_MIRROR_KEY,
-          type: "json",
-          value: runtimePayload,
-        },
-      );
+      if (runtimeBytes <= FUNCTION_CONFIG_MAX_BYTES) {
+        runtimeMirrorMetafields.push(
+          {
+            ownerId: cleanedShopOwnerId,
+            namespace: SHOP_RUNTIME_APP_MIRROR_NAMESPACE,
+            key: SHOP_RUNTIME_MIRROR_KEY,
+            type: "json",
+            value: runtimePayload,
+          },
+          {
+            ownerId: cleanedShopOwnerId,
+            namespace: SHOP_RUNTIME_MIRROR_NAMESPACE,
+            key: SHOP_RUNTIME_MIRROR_KEY,
+            type: "json",
+            value: runtimePayload,
+          },
+        );
+      } else {
+        const mirrorChunks = splitUtf8ByBytes(runtimePayload, RUNTIME_CONFIG_CHUNK_MAX_BYTES);
+        if (mirrorChunks.length <= FUNCTION_CONFIG_MAX_CHUNKS) {
+          runtimeMirrorMetafields.push({
+            ownerId: cleanedShopOwnerId,
+            namespace: SHOP_RUNTIME_APP_MIRROR_NAMESPACE,
+            key: SHOP_RUNTIME_MIRROR_KEY,
+            type: "json",
+            value: JSON.stringify({ chunked: true, parts: mirrorChunks.length }),
+          });
+          mirrorChunks.forEach((chunk, idx) => {
+            runtimeMirrorMetafields.push({
+              ownerId: cleanedShopOwnerId,
+              namespace: SHOP_RUNTIME_APP_MIRROR_NAMESPACE,
+              key: `${SHOP_RUNTIME_MIRROR_CHUNK_KEY_PREFIX}${idx + 1}`,
+              type: "multi_line_text_field",
+              value: chunk,
+            });
+          });
+          runtimeMirrorMetafields.push({
+            ownerId: cleanedShopOwnerId,
+            namespace: SHOP_RUNTIME_MIRROR_NAMESPACE,
+            key: SHOP_RUNTIME_MIRROR_KEY,
+            type: "json",
+            value: JSON.stringify({ chunked: true, parts: mirrorChunks.length }),
+          });
+        }
+      }
     }
   }
 
