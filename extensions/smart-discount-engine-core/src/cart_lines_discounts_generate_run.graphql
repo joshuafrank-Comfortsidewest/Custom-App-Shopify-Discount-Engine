@@ -2,14 +2,51 @@ query Input {
   cart {
     lines {
       id
+      quantity
       cost {
         subtotalAmount {
           amount
         }
       }
+      merchandise {
+        __typename
+        ... on ProductVariant {
+          id
+          sku
+          product {
+            id
+          }
+        }
+      }
     }
   }
-  discount {
-    discountClasses
+  shop {
+    runtimeConfig: metafield(namespace: "smart_discount_engine", key: "config") {
+      value
+    }
+    runtimeConfigPart1: metafield(namespace: "smart_discount_engine", key: "config-part-1") {
+      value
+    }
+    runtimeConfigPart2: metafield(namespace: "smart_discount_engine", key: "config-part-2") {
+      value
+    }
+    runtimeConfigPart3: metafield(namespace: "smart_discount_engine", key: "config-part-3") {
+      value
+    }
+    runtimeConfigPart4: metafield(namespace: "smart_discount_engine", key: "config-part-4") {
+      value
+    }
+    runtimeConfigPart5: metafield(namespace: "smart_discount_engine", key: "config-part-5") {
+      value
+    }
+    runtimeConfigPart6: metafield(namespace: "smart_discount_engine", key: "config-part-6") {
+      value
+    }
+    runtimeConfigPart7: metafield(namespace: "smart_discount_engine", key: "config-part-7") {
+      value
+    }
+    runtimeConfigPart8: metafield(namespace: "smart_discount_engine", key: "config-part-8") {
+      value
+    }
   }
 }
