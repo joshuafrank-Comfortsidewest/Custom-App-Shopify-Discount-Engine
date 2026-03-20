@@ -11,7 +11,7 @@ import {
   InlineStack,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData, useOutlet } from "@remix-run/react";
 import { authenticate } from "../shopify.server";
 
 type RuntimeStatus = {
@@ -171,6 +171,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export default function DiscountsPage() {
   const { status } = useLoaderData<typeof loader>();
+  const outlet = useOutlet();
+
+  if (outlet) {
+    return <>{outlet}</>;
+  }
 
   return (
     <Page>
