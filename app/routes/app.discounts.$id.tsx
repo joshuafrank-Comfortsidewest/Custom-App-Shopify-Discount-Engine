@@ -2324,6 +2324,61 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   config.hvac_rule.enabled =
     topHvacEnabled || hvacCombinationRules.some((r) => Boolean(r?.enabled));
 
+  const emptyItemRuleCollections =
+    config.toggles.item_collection_enabled
+      ? (config.item_collection_rules ?? [])
+          .filter((rule) => String(rule?.collection_id ?? "").trim() && (rule.product_ids?.length ?? 0) === 0)
+          .map((rule) => String(rule.collection_id))
+      : [];
+  if (emptyItemRuleCollections.length > 0) {
+    return {
+      ok: false,
+      errors: [
+        {
+          field: ["collectionSync"],
+          message: `One or more item-rule collections resolved to 0 products: ${emptyItemRuleCollections.join(", ")}`,
+        },
+      ],
+      conflicts: detectConflicts(config),
+    };
+  }
+
+  if (config.toggles.collection_spend_enabled && csCollectionId && csProductIds.length === 0) {
+    return {
+      ok: false,
+      errors: [
+        {
+          field: ["collectionSync"],
+          message: `Other Discounts collection resolved to 0 products: ${csCollectionId}`,
+        },
+      ],
+      conflicts: detectConflicts(config),
+    };
+  }
+
+  const runtimePreview = buildRuntimeFunctionConfig(config);
+  const runtimePreviewBytes = Buffer.byteLength(JSON.stringify(runtimePreview), "utf8");
+  const probeProductId = "7914534076531";
+  const probeInItemRules = (config.item_collection_rules ?? []).some((rule) =>
+    (rule.product_ids ?? []).some((pid) => compactProductId(pid) === probeProductId),
+  );
+  console.info("[discount-save] runtime-summary", {
+    shop: session.shop,
+    discountNodeId: configOwnerId,
+    itemRulesEnabled: config.toggles.item_collection_enabled,
+    itemRuleCount: config.item_collection_rules.length,
+    itemRuleProductCount: config.item_collection_rules.reduce(
+      (sum, rule) => sum + (rule.product_ids?.length ?? 0),
+      0,
+    ),
+    otherDiscountsEnabled: config.toggles.collection_spend_enabled,
+    otherDiscountCollectionId: csCollectionId,
+    otherDiscountProductCount: csProductIds.length,
+    probeProductId,
+    probeInItemRules,
+    runtimePreviewBytes,
+  });
+
   const runtimeOwnerIds = Array.from(
     new Set(
       [currentMeta.nodeId, currentMeta.discountId, configOwnerId]
@@ -2335,9 +2390,20 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     shopOwnerId: shopMeta.shopId,
     runtimeOwnerIds,
   });
+  const persistErrors = json?.data?.metafieldsSet?.userErrors ?? [];
+  console.info("[discount-save] persist-result", {
+    shop: session.shop,
+    discountNodeId: configOwnerId,
+    ok: persistErrors.length === 0,
+    errorCount: persistErrors.length,
+    errors: persistErrors.slice(0, 5).map((e: any) => ({
+      field: e?.field ?? [],
+      message: String(e?.message ?? "Unknown error"),
+    })),
+  });
   return {
-    ok: (json?.data?.metafieldsSet?.userErrors ?? []).length === 0,
-    errors: json?.data?.metafieldsSet?.userErrors ?? [],
+    ok: persistErrors.length === 0,
+    errors: persistErrors,
     conflicts: detectConflicts(config),
   };
 };
