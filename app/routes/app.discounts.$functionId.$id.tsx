@@ -25,6 +25,12 @@ import { authenticate } from "../shopify.server";
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type CollectionOption = { id: string; title: string };
+type SpendActivationMode =
+  | "always"
+  | "no_other_discounts"
+  | "requires_any_xyz_active"
+  | "requires_xyz_state";
+type RuleConditionState = "any" | "active" | "inactive";
 
 type ItemCollectionRule = {
   collection_id: string;
@@ -32,21 +38,8 @@ type ItemCollectionRule = {
   product_ids: string[];
 };
 
-type HvacCombinationRule = {
-  name: string;
-  enabled: boolean;
-  min_indoor_per_outdoor: number;
-  max_indoor_per_outdoor: number;
-  indoor_product_ids: string[];
-  outdoor_product_ids: string[];
-  percent_off_hvac_products: number;
-  amount_off_outdoor_per_bundle: number;
-  stack_mode: string;
-};
-
 type HvacRule = {
   enabled: boolean;
-  // stored for admin re-load; ignored by Rust function
   indoor_collection_id: string;
   outdoor_collection_id: string;
   min_indoor_per_outdoor: number;
@@ -55,7 +48,16 @@ type HvacRule = {
   amount_off_outdoor_per_bundle: number;
   indoor_product_ids: string[];
   outdoor_product_ids: string[];
-  combination_rules: HvacCombinationRule[];
+  combination_rules: any[];
+};
+
+type SpendActivation = {
+  mode: SpendActivationMode;
+  required_any: Array<"bulk" | "vip" | "first">;
+  xyz_operator: "and" | "or";
+  bulk_state: RuleConditionState;
+  vip_state: RuleConditionState;
+  first_state: RuleConditionState;
 };
 
 type CollectionSpendRule = {
@@ -65,6 +67,7 @@ type CollectionSpendRule = {
   min_collection_qty: number;
   spend_step_amount: number;
   product_ids: string[];
+  activation: SpendActivation;
 };
 
 type RuntimeConfig = {
@@ -88,6 +91,9 @@ type RuntimeConfig = {
   item_collection_rules: ItemCollectionRule[];
   hvac_rule: HvacRule;
   collection_spend_rule: CollectionSpendRule;
+  block_if_any_entered_discount_code: boolean;
+  return_conflict_enabled: boolean;
+  return_blocked_codes: string[];
 };
 
 type ActionResult = {
@@ -98,8 +104,18 @@ type ActionResult = {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const CHUNK_SIZE = 50_000;
+// 45 KB per chunk so that JSON.stringify(fragment) stays well under Shopify's 65 535 B limit
+const CHUNK_SIZE = 45_000;
 const MAX_PARTS = 6;
+
+const DEFAULT_ACTIVATION: SpendActivation = {
+  mode: "always",
+  required_any: ["bulk"],
+  xyz_operator: "or",
+  bulk_state: "any",
+  vip_state: "any",
+  first_state: "any",
+};
 
 const DEFAULT_HVAC: HvacRule = {
   enabled: false,
@@ -121,6 +137,7 @@ const DEFAULT_SPEND: CollectionSpendRule = {
   min_collection_qty: 1,
   spend_step_amount: 100,
   product_ids: [],
+  activation: DEFAULT_ACTIVATION,
 };
 
 const DEFAULT_CONFIG: RuntimeConfig = {
@@ -144,9 +161,12 @@ const DEFAULT_CONFIG: RuntimeConfig = {
   item_collection_rules: [],
   hvac_rule: DEFAULT_HVAC,
   collection_spend_rule: DEFAULT_SPEND,
+  block_if_any_entered_discount_code: false,
+  return_conflict_enabled: true,
+  return_blocked_codes: ["RETURN"],
 };
 
-// ── Server helpers ────────────────────────────────────────────────────────────
+// ── Server helpers ─────────────────────────────────────────────────────────────
 
 async function fetchCollections(admin: any): Promise<CollectionOption[]> {
   const res = await admin.graphql(`
@@ -242,7 +262,17 @@ function parseShopConfig(primary: string | null, parts: Array<string | null>): R
         ? parsed.item_collection_rules
         : [],
       hvac_rule: { ...DEFAULT_HVAC, ...(parsed.hvac_rule ?? {}) },
-      collection_spend_rule: { ...DEFAULT_SPEND, ...(parsed.collection_spend_rule ?? {}) },
+      collection_spend_rule: {
+        ...DEFAULT_SPEND,
+        ...(parsed.collection_spend_rule ?? {}),
+        activation: {
+          ...DEFAULT_ACTIVATION,
+          ...(parsed.collection_spend_rule?.activation ?? {}),
+        },
+      },
+      return_blocked_codes: Array.isArray(parsed.return_blocked_codes)
+        ? parsed.return_blocked_codes
+        : DEFAULT_CONFIG.return_blocked_codes,
     };
   } catch {
     return DEFAULT_CONFIG;
@@ -254,7 +284,7 @@ function chunkConfig(config: RuntimeConfig): { manifest: string; parts: string[]
   if (Buffer.byteLength(fullJson, "utf8") <= CHUNK_SIZE) {
     return { manifest: fullJson, parts: [] };
   }
-  const parts: string[] = [];
+  const rawParts: string[] = [];
   let offset = 0;
   while (offset < fullJson.length) {
     let end = offset + CHUNK_SIZE;
@@ -264,16 +294,18 @@ function chunkConfig(config: RuntimeConfig): { manifest: string; parts: string[]
     ) {
       end -= 100;
     }
-    parts.push(fullJson.slice(offset, end));
+    rawParts.push(fullJson.slice(offset, end));
     offset = end;
   }
-  if (parts.length > MAX_PARTS) {
-    throw new Error(`Config needs ${parts.length} chunks, max is ${MAX_PARTS}. Reduce collection sizes.`);
+  if (rawParts.length > MAX_PARTS) {
+    throw new Error(
+      `Config needs ${rawParts.length} chunks, max is ${MAX_PARTS}. Reduce collection sizes.`,
+    );
   }
-  return { manifest: JSON.stringify({ chunked: true, parts: parts.length }), parts };
+  return { manifest: JSON.stringify({ chunked: true, parts: rawParts.length }), parts: rawParts };
 }
 
-// ── Loader ────────────────────────────────────────────────────────────────────
+// ── Loader ─────────────────────────────────────────────────────────────────────
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
@@ -311,7 +343,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return json({ config, collections });
 };
 
-// ── Action ────────────────────────────────────────────────────────────────────
+// ── Action ─────────────────────────────────────────────────────────────────────
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
@@ -357,7 +389,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const spendIds = await fetchAllProductIds(admin, spendBase.collection_id ?? "");
   if (spendIds.length > 0) productCounts.push({ label: "Collection spend", count: spendIds.length });
 
-  const collection_spend_rule: CollectionSpendRule = { ...spendBase, product_ids: spendIds };
+  const collection_spend_rule: CollectionSpendRule = {
+    ...spendBase,
+    product_ids: spendIds,
+    activation: {
+      ...DEFAULT_ACTIVATION,
+      ...(spendBase.activation ?? {}),
+    },
+  };
 
   const fullConfig: RuntimeConfig = {
     ...parsed,
@@ -394,18 +433,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json<ActionResult>({ ok: false, errors: ["Could not resolve shop ID."], productCounts });
   }
 
+  // Parts are stored as JSON-encoded strings (JSON.stringify wraps the fragment in quotes +
+  // escapes inner quotes). This makes each metafield value valid JSON, which Shopify requires
+  // for type "json". The Rust function's decode_json_string() unwraps them transparently.
   const metafields: any[] = [
-    { ownerId: shopId, namespace: "smart_discount_engine", key: "config", type: "json", value: manifest },
+    {
+      ownerId: shopId,
+      namespace: "smart_discount_engine",
+      key: "config",
+      type: "json",
+      value: manifest,
+    },
     ...parts.map((part, i) => ({
       ownerId: shopId,
       namespace: "smart_discount_engine",
       key: `config-part-${i + 1}`,
       type: "json",
-      value: part,
+      value: JSON.stringify(part), // fragment wrapped as a JSON string → valid JSON
     })),
   ];
 
-  const saveRes = await admin.graphql(`
+  const saveRes = await admin.graphql(
+    `
     #graphql
     mutation SaveRuntimeConfig($metafields: [MetafieldsSetInput!]!) {
       metafieldsSet(metafields: $metafields) {
@@ -423,7 +472,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return json<ActionResult>({ ok: errors.length === 0, errors, productCounts });
 };
 
-// ── Component ─────────────────────────────────────────────────────────────────
+// ── Component ──────────────────────────────────────────────────────────────────
 
 type Section = "order" | "item" | "hvac" | "spend" | "status";
 type RuleState = { collection_id: string; percent: string };
@@ -454,6 +503,11 @@ export default function DiscountConfigRoute() {
   const [bulk15Min, setBulk15Min] = useState(String(config.bulk15_min));
   const [bulk15Pct, setBulk15Pct] = useState(String(config.bulk15_percent));
 
+  // Global conflict settings
+  const [blockIfCode, setBlockIfCode] = useState(config.block_if_any_entered_discount_code);
+  const [returnConflict, setReturnConflict] = useState(config.return_conflict_enabled);
+  const [returnCodes, setReturnCodes] = useState(config.return_blocked_codes.join(","));
+
   // Item rules
   const [rules, setRules] = useState<RuleState[]>(
     config.item_collection_rules.map((r) => ({
@@ -463,19 +517,37 @@ export default function DiscountConfigRoute() {
   );
 
   // HVAC rules
-  const [hvacEnabled, setHvacEnabled] = useState(config.hvac_rule.enabled);
   const [hvacIndoor, setHvacIndoor] = useState(config.hvac_rule.indoor_collection_id ?? "");
   const [hvacOutdoor, setHvacOutdoor] = useState(config.hvac_rule.outdoor_collection_id ?? "");
   const [hvacMinIndoor, setHvacMinIndoor] = useState(String(config.hvac_rule.min_indoor_per_outdoor));
   const [hvacMaxIndoor, setHvacMaxIndoor] = useState(String(config.hvac_rule.max_indoor_per_outdoor));
   const [hvacPercent, setHvacPercent] = useState(String(config.hvac_rule.percent_off_hvac_products));
-  const [hvacAmountOff, setHvacAmountOff] = useState(String(config.hvac_rule.amount_off_outdoor_per_bundle));
+  const [hvacAmountOff, setHvacAmountOff] = useState(
+    String(config.hvac_rule.amount_off_outdoor_per_bundle),
+  );
 
   // Collection spend rule
   const [spendCollection, setSpendCollection] = useState(config.collection_spend_rule.collection_id);
-  const [spendPctPerStep, setSpendPctPerStep] = useState(String(config.collection_spend_rule.percent_off_per_step));
-  const [spendMinQty, setSpendMinQty] = useState(String(config.collection_spend_rule.min_collection_qty));
-  const [spendStepAmount, setSpendStepAmount] = useState(String(config.collection_spend_rule.spend_step_amount));
+  const [spendPctPerStep, setSpendPctPerStep] = useState(
+    String(config.collection_spend_rule.percent_off_per_step),
+  );
+  const [spendMinQty, setSpendMinQty] = useState(
+    String(config.collection_spend_rule.min_collection_qty),
+  );
+  const [spendStepAmount, setSpendStepAmount] = useState(
+    String(config.collection_spend_rule.spend_step_amount),
+  );
+
+  // Spend activation (X/Y/Z rule)
+  const act = config.collection_spend_rule.activation;
+  const [spendMode, setSpendMode] = useState<SpendActivationMode>(act.mode);
+  const [spendReqBulk, setSpendReqBulk] = useState(act.required_any.includes("bulk"));
+  const [spendReqVip, setSpendReqVip] = useState(act.required_any.includes("vip"));
+  const [spendReqFirst, setSpendReqFirst] = useState(act.required_any.includes("first"));
+  const [spendXyzOp, setSpendXyzOp] = useState<"and" | "or">(act.xyz_operator);
+  const [spendBulkState, setSpendBulkState] = useState<RuleConditionState>(act.bulk_state);
+  const [spendVipState, setSpendVipState] = useState<RuleConditionState>(act.vip_state);
+  const [spendFirstState, setSpendFirstState] = useState<RuleConditionState>(act.first_state);
 
   const [section, setSection] = useState<Section>("order");
 
@@ -485,7 +557,8 @@ export default function DiscountConfigRoute() {
   ];
 
   const totalItemProducts = config.item_collection_rules.reduce(
-    (s, r) => s + (r.product_ids?.length ?? 0), 0,
+    (s, r) => s + (r.product_ids?.length ?? 0),
+    0,
   );
 
   const handleSubmit = (_e: React.FormEvent<HTMLFormElement>) => {
@@ -512,15 +585,15 @@ export default function DiscountConfigRoute() {
         .filter((r) => r.collection_id && Number(r.percent) > 0)
         .map((r) => ({ collection_id: r.collection_id, percent: Number(r.percent), product_ids: [] })),
       hvac_rule: {
-        enabled: hvacEnabled,
+        enabled: toggleHvac,
         indoor_collection_id: hvacIndoor,
         outdoor_collection_id: hvacOutdoor,
         min_indoor_per_outdoor: Number(hvacMinIndoor) || 2,
         max_indoor_per_outdoor: Number(hvacMaxIndoor) || 6,
         percent_off_hvac_products: Number(hvacPercent) || 0,
         amount_off_outdoor_per_bundle: Number(hvacAmountOff) || 0,
-        indoor_product_ids: [],  // fetched server-side
-        outdoor_product_ids: [], // fetched server-side
+        indoor_product_ids: [],
+        outdoor_product_ids: [],
         combination_rules: config.hvac_rule.combination_rules ?? [],
       },
       collection_spend_rule: {
@@ -529,8 +602,26 @@ export default function DiscountConfigRoute() {
         percent_off_per_step: Number(spendPctPerStep) || 0,
         min_collection_qty: Number(spendMinQty) || 1,
         spend_step_amount: Number(spendStepAmount) || 0,
-        product_ids: [], // fetched server-side
+        product_ids: [],
+        activation: {
+          mode: spendMode,
+          required_any: [
+            ...(spendReqBulk ? (["bulk"] as const) : []),
+            ...(spendReqVip ? (["vip"] as const) : []),
+            ...(spendReqFirst ? (["first"] as const) : []),
+          ],
+          xyz_operator: spendXyzOp,
+          bulk_state: spendBulkState,
+          vip_state: spendVipState,
+          first_state: spendFirstState,
+        },
       },
+      block_if_any_entered_discount_code: blockIfCode,
+      return_conflict_enabled: returnConflict,
+      return_blocked_codes: returnCodes
+        .split(",")
+        .map((s) => s.trim().toUpperCase())
+        .filter(Boolean),
     };
     configInputRef.current.value = JSON.stringify(built);
   };
@@ -542,6 +633,15 @@ export default function DiscountConfigRoute() {
     { key: "spend", label: "Spend Rules" },
     { key: "status", label: "Status" },
   ];
+
+  const stateOptions: Array<{ label: string; value: RuleConditionState }> = [
+    { label: "Any", value: "any" },
+    { label: "Active", value: "active" },
+    { label: "Inactive", value: "inactive" },
+  ];
+
+  const showXyzOptions =
+    spendMode === "requires_any_xyz_active" || spendMode === "requires_xyz_state";
 
   return (
     <Page>
@@ -556,7 +656,9 @@ export default function DiscountConfigRoute() {
                 <List type="bullet">
                   <List.Item>Function will use updated rules on next cart load.</List.Item>
                   {actionData.productCounts.map((pc, i) => (
-                    <List.Item key={i}>{pc.count} products → {pc.label}</List.Item>
+                    <List.Item key={i}>
+                      {pc.count} products → {pc.label}
+                    </List.Item>
                   ))}
                 </List>
               </Banner>
@@ -566,7 +668,9 @@ export default function DiscountConfigRoute() {
             <Layout.Section>
               <Banner tone="critical" title="Save failed">
                 <List type="bullet">
-                  {actionData.errors.map((e, i) => <List.Item key={i}>{e}</List.Item>)}
+                  {actionData.errors.map((e, i) => (
+                    <List.Item key={i}>{e}</List.Item>
+                  ))}
                 </List>
               </Banner>
             </Layout.Section>
@@ -576,14 +680,16 @@ export default function DiscountConfigRoute() {
           <Layout.Section>
             <Card>
               <BlockStack gap="300">
-                <Text as="h2" variant="headingMd">Discount Toggles</Text>
+                <Text as="h2" variant="headingMd">
+                  Discount Toggles
+                </Text>
                 <InlineStack gap="400" wrap>
                   <Checkbox label="First Order" checked={toggleFirstOrder} onChange={setToggleFirstOrder} />
                   <Checkbox label="Bulk" checked={toggleBulk} onChange={setToggleBulk} />
                   <Checkbox label="VIP (VIP3–VIP25)" checked={toggleVip} onChange={setToggleVip} />
                   <Checkbox label="Item Collection" checked={toggleItem} onChange={setToggleItem} />
                   <Checkbox label="HVAC" checked={toggleHvac} onChange={setToggleHvac} />
-                  <Checkbox label="Spend Rules" checked={toggleSpend} onChange={setToggleSpend} />
+                  <Checkbox label="X/Y/Z Spend Rule" checked={toggleSpend} onChange={setToggleSpend} />
                 </InlineStack>
               </BlockStack>
             </Card>
@@ -607,41 +713,74 @@ export default function DiscountConfigRoute() {
           {/* ── Order Rules ── */}
           {section === "order" && (
             <Layout.Section>
-              <Card>
-                <BlockStack gap="400">
-                  <Text as="h3" variant="headingSm">First Order Discount</Text>
-                  <TextField
-                    label="Discount % for first-time customers"
-                    type="number"
-                    value={firstOrderPct}
-                    onChange={setFirstOrderPct}
-                    autoComplete="off"
-                  />
-                  <Divider />
-                  <Text as="h3" variant="headingSm">Bulk Tiers — by order subtotal ($)</Text>
-                  <Text as="p" variant="bodyMd" tone="subdued">
-                    Customer gets the highest tier their subtotal qualifies for.
-                  </Text>
-                  <FormLayout>
-                    <FormLayout.Group>
-                      <TextField label="Tier 1 Min $" type="number" value={bulk5Min} onChange={setBulk5Min} autoComplete="off" />
-                      <TextField label="Tier 1 %" type="number" value={bulk5Pct} onChange={setBulk5Pct} autoComplete="off" />
-                    </FormLayout.Group>
-                    <FormLayout.Group>
-                      <TextField label="Tier 2 Min $" type="number" value={bulk10Min} onChange={setBulk10Min} autoComplete="off" />
-                      <TextField label="Tier 2 %" type="number" value={bulk10Pct} onChange={setBulk10Pct} autoComplete="off" />
-                    </FormLayout.Group>
-                    <FormLayout.Group>
-                      <TextField label="Tier 3 Min $" type="number" value={bulk13Min} onChange={setBulk13Min} autoComplete="off" />
-                      <TextField label="Tier 3 %" type="number" value={bulk13Pct} onChange={setBulk13Pct} autoComplete="off" />
-                    </FormLayout.Group>
-                    <FormLayout.Group>
-                      <TextField label="Tier 4 Min $" type="number" value={bulk15Min} onChange={setBulk15Min} autoComplete="off" />
-                      <TextField label="Tier 4 %" type="number" value={bulk15Pct} onChange={setBulk15Pct} autoComplete="off" />
-                    </FormLayout.Group>
-                  </FormLayout>
-                </BlockStack>
-              </Card>
+              <BlockStack gap="400">
+                <Card>
+                  <BlockStack gap="400">
+                    <Text as="h3" variant="headingSm">
+                      First Order Discount
+                    </Text>
+                    <TextField
+                      label="Discount % for first-time customers"
+                      type="number"
+                      value={firstOrderPct}
+                      onChange={setFirstOrderPct}
+                      autoComplete="off"
+                    />
+                    <Divider />
+                    <Text as="h3" variant="headingSm">
+                      Bulk Tiers — by order subtotal ($)
+                    </Text>
+                    <Text as="p" variant="bodyMd" tone="subdued">
+                      Customer gets the highest tier their subtotal qualifies for.
+                    </Text>
+                    <FormLayout>
+                      <FormLayout.Group>
+                        <TextField label="Tier 1 Min $" type="number" value={bulk5Min} onChange={setBulk5Min} autoComplete="off" />
+                        <TextField label="Tier 1 %" type="number" value={bulk5Pct} onChange={setBulk5Pct} autoComplete="off" />
+                      </FormLayout.Group>
+                      <FormLayout.Group>
+                        <TextField label="Tier 2 Min $" type="number" value={bulk10Min} onChange={setBulk10Min} autoComplete="off" />
+                        <TextField label="Tier 2 %" type="number" value={bulk10Pct} onChange={setBulk10Pct} autoComplete="off" />
+                      </FormLayout.Group>
+                      <FormLayout.Group>
+                        <TextField label="Tier 3 Min $" type="number" value={bulk13Min} onChange={setBulk13Min} autoComplete="off" />
+                        <TextField label="Tier 3 %" type="number" value={bulk13Pct} onChange={setBulk13Pct} autoComplete="off" />
+                      </FormLayout.Group>
+                      <FormLayout.Group>
+                        <TextField label="Tier 4 Min $" type="number" value={bulk15Min} onChange={setBulk15Min} autoComplete="off" />
+                        <TextField label="Tier 4 %" type="number" value={bulk15Pct} onChange={setBulk15Pct} autoComplete="off" />
+                      </FormLayout.Group>
+                    </FormLayout>
+                  </BlockStack>
+                </Card>
+
+                <Card>
+                  <BlockStack gap="300">
+                    <Text as="h3" variant="headingSm">
+                      Discount Code Conflict Settings
+                    </Text>
+                    <Checkbox
+                      label="Block app discounts if customer has already entered a discount code"
+                      checked={blockIfCode}
+                      onChange={setBlockIfCode}
+                    />
+                    <Checkbox
+                      label="Prevent stacking with Return/exchange discount codes"
+                      checked={returnConflict}
+                      onChange={setReturnConflict}
+                    />
+                    {returnConflict && (
+                      <TextField
+                        label="Blocked codes (comma-separated)"
+                        value={returnCodes}
+                        onChange={setReturnCodes}
+                        helpText="e.g. RETURN,EXCHANGE — app discount will not apply when these codes are active"
+                        autoComplete="off"
+                      />
+                    )}
+                  </BlockStack>
+                </Card>
+              </BlockStack>
             </Layout.Section>
           )}
 
@@ -650,18 +789,25 @@ export default function DiscountConfigRoute() {
             <Layout.Section>
               <Card>
                 <BlockStack gap="400">
-                  <Text as="h3" variant="headingSm">Item Collection Rules</Text>
+                  <Text as="h3" variant="headingSm">
+                    Item Collection Rules
+                  </Text>
                   <Text as="p" variant="bodyMd" tone="subdued">
-                    Products in the selected collection get the specified discount %. Product IDs
-                    are fetched on save — handles 2500+ products via chunked shop metafields.
+                    Products in the selected collection get the specified discount %. Product IDs are
+                    fetched on save — handles 2500+ products via chunked shop metafields.
                   </Text>
                   {rules.map((rule, i) => (
                     <Card key={`rule-${i}`}>
                       <BlockStack gap="200">
                         <InlineStack align="space-between" blockAlign="center">
-                          <Text as="h4" variant="headingSm">Rule {i + 1}</Text>
-                          <Button variant="plain" tone="critical"
-                            onClick={() => setRules((p) => p.filter((_, j) => j !== i))}>
+                          <Text as="h4" variant="headingSm">
+                            Rule {i + 1}
+                          </Text>
+                          <Button
+                            variant="plain"
+                            tone="critical"
+                            onClick={() => setRules((p) => p.filter((_, j) => j !== i))}
+                          >
                             Remove
                           </Button>
                         </InlineStack>
@@ -669,19 +815,27 @@ export default function DiscountConfigRoute() {
                           label="Collection"
                           options={collectionOptions}
                           value={rule.collection_id}
-                          onChange={(v) => setRules((p) => p.map((r, j) => j === i ? { ...r, collection_id: v } : r))}
+                          onChange={(v) =>
+                            setRules((p) => p.map((r, j) => (j === i ? { ...r, collection_id: v } : r)))
+                          }
                         />
                         <TextField
                           label="Discount %"
                           type="number"
                           value={rule.percent}
-                          onChange={(v) => setRules((p) => p.map((r, j) => j === i ? { ...r, percent: v } : r))}
+                          onChange={(v) =>
+                            setRules((p) => p.map((r, j) => (j === i ? { ...r, percent: v } : r)))
+                          }
                           autoComplete="off"
                         />
                       </BlockStack>
                     </Card>
                   ))}
-                  <Button onClick={() => setRules((p) => [...p, { collection_id: "", percent: "5" }])}>
+                  <Button
+                    onClick={() =>
+                      setRules((p) => [...p, { collection_id: "", percent: "5" }])
+                    }
+                  >
                     + Add Rule
                   </Button>
                 </BlockStack>
@@ -694,13 +848,13 @@ export default function DiscountConfigRoute() {
             <Layout.Section>
               <Card>
                 <BlockStack gap="400">
-                  <Text as="h3" variant="headingSm">HVAC Bundle Rules</Text>
-                  <Text as="p" variant="bodyMd" tone="subdued">
-                    Customers who buy a minimum ratio of indoor to outdoor units get a bundle discount.
-                    Product IDs are fetched from the selected collections on save.
+                  <Text as="h3" variant="headingSm">
+                    HVAC Bundle Rules
                   </Text>
-                  <Checkbox label="Enable HVAC rules" checked={hvacEnabled} onChange={setHvacEnabled} />
-                  <Divider />
+                  <Text as="p" variant="bodyMd" tone="subdued">
+                    Customers who buy a qualifying ratio of indoor to outdoor units get a bundle
+                    discount. Product IDs are fetched from the selected collections on save.
+                  </Text>
                   <Select
                     label="Indoor Products Collection"
                     options={collectionOptions}
@@ -729,17 +883,17 @@ export default function DiscountConfigRoute() {
                         type="number"
                         value={hvacMaxIndoor}
                         onChange={setHvacMaxIndoor}
-                        helpText="Cap on how many indoor units receive the discount"
+                        helpText="Cap on how many indoor units receive the bundle discount"
                         autoComplete="off"
                       />
                     </FormLayout.Group>
                     <FormLayout.Group>
                       <TextField
-                        label="% off all HVAC products"
+                        label="% off all HVAC products in bundle"
                         type="number"
                         value={hvacPercent}
                         onChange={setHvacPercent}
-                        helpText="Applied to both indoor and outdoor units in the bundle"
+                        helpText="Applied to both indoor and outdoor units in the qualifying bundle"
                         autoComplete="off"
                       />
                       <TextField
@@ -747,7 +901,7 @@ export default function DiscountConfigRoute() {
                         type="number"
                         value={hvacAmountOff}
                         onChange={setHvacAmountOff}
-                        helpText="Fixed dollar discount per qualifying outdoor unit"
+                        helpText="Fixed dollar discount applied to each qualifying outdoor unit"
                         autoComplete="off"
                       />
                     </FormLayout.Group>
@@ -763,51 +917,126 @@ export default function DiscountConfigRoute() {
             </Layout.Section>
           )}
 
-          {/* ── Spend Rules ── */}
+          {/* ── Spend Rules (X/Y/Z) ── */}
           {section === "spend" && (
             <Layout.Section>
-              <Card>
-                <BlockStack gap="400">
-                  <Text as="h3" variant="headingSm">Collection Spend Rules</Text>
-                  <Text as="p" variant="bodyMd" tone="subdued">
-                    Customers who spend a set amount on products from this collection earn a
-                    stepped discount. Product IDs are fetched from the collection on save.
-                  </Text>
-                  <Checkbox label="Enable collection spend rule" checked={toggleSpend} onChange={setToggleSpend} />
-                  <Select
-                    label="Collection"
-                    options={collectionOptions}
-                    value={spendCollection}
-                    onChange={setSpendCollection}
-                  />
-                  <FormLayout>
-                    <FormLayout.Group>
-                      <TextField
-                        label="% off per spend step"
-                        type="number"
-                        value={spendPctPerStep}
-                        onChange={setSpendPctPerStep}
-                        autoComplete="off"
-                      />
-                      <TextField
-                        label="Spend step amount ($)"
-                        type="number"
-                        value={spendStepAmount}
-                        onChange={setSpendStepAmount}
-                        helpText="e.g. 100 = gain 1 step per $100 spent on collection products"
-                        autoComplete="off"
-                      />
-                    </FormLayout.Group>
-                    <TextField
-                      label="Min collection item qty to activate"
-                      type="number"
-                      value={spendMinQty}
-                      onChange={setSpendMinQty}
-                      autoComplete="off"
+              <BlockStack gap="400">
+                <Card>
+                  <BlockStack gap="400">
+                    <Text as="h3" variant="headingSm">
+                      Collection Spend Rule (X/Y/Z)
+                    </Text>
+                    <Text as="p" variant="bodyMd" tone="subdued">
+                      Customers earn a stepped discount by spending on products from this collection.
+                      Each spend step grants an additional % off. Product IDs are fetched on save.
+                    </Text>
+                    <Select
+                      label="Collection"
+                      options={collectionOptions}
+                      value={spendCollection}
+                      onChange={setSpendCollection}
                     />
-                  </FormLayout>
-                </BlockStack>
-              </Card>
+                    <FormLayout>
+                      <FormLayout.Group>
+                        <TextField
+                          label="% off per spend step"
+                          type="number"
+                          value={spendPctPerStep}
+                          onChange={setSpendPctPerStep}
+                          autoComplete="off"
+                        />
+                        <TextField
+                          label="Spend step amount ($)"
+                          type="number"
+                          value={spendStepAmount}
+                          onChange={setSpendStepAmount}
+                          helpText="e.g. 100 = gain 1 step per $100 spent on collection products"
+                          autoComplete="off"
+                        />
+                      </FormLayout.Group>
+                      <TextField
+                        label="Min collection item qty to activate"
+                        type="number"
+                        value={spendMinQty}
+                        onChange={setSpendMinQty}
+                        autoComplete="off"
+                      />
+                    </FormLayout>
+                  </BlockStack>
+                </Card>
+
+                <Card>
+                  <BlockStack gap="400">
+                    <Text as="h3" variant="headingSm">
+                      Activation Conditions
+                    </Text>
+                    <Select
+                      label="When is the spend rule active?"
+                      options={[
+                        { label: "Always active", value: "always" },
+                        { label: "Only if no discount code entered", value: "no_other_discounts" },
+                        {
+                          label: "Only if selected discount types (X/Y/Z) are active",
+                          value: "requires_any_xyz_active",
+                        },
+                        {
+                          label: "Only if X/Y/Z discount types match specific states",
+                          value: "requires_xyz_state",
+                        },
+                      ]}
+                      value={spendMode}
+                      onChange={(v) => setSpendMode(v as SpendActivationMode)}
+                    />
+
+                    {showXyzOptions && (
+                      <>
+                        <Text as="p" variant="bodyMd">
+                          Required discount types (X = bulk, Y = VIP, Z = first order):
+                        </Text>
+                        <InlineStack gap="400">
+                          <Checkbox label="X — Bulk discount active" checked={spendReqBulk} onChange={setSpendReqBulk} />
+                          <Checkbox label="Y — VIP discount active" checked={spendReqVip} onChange={setSpendReqVip} />
+                          <Checkbox label="Z — First-order discount active" checked={spendReqFirst} onChange={setSpendReqFirst} />
+                        </InlineStack>
+                        <Select
+                          label="Required types operator"
+                          options={[
+                            { label: "OR — any one must be active", value: "or" },
+                            { label: "AND — all must be active", value: "and" },
+                          ]}
+                          value={spendXyzOp}
+                          onChange={(v) => setSpendXyzOp(v as "and" | "or")}
+                        />
+                      </>
+                    )}
+
+                    {spendMode === "requires_xyz_state" && (
+                      <FormLayout>
+                        <FormLayout.Group>
+                          <Select
+                            label="Bulk (X) state"
+                            options={stateOptions}
+                            value={spendBulkState}
+                            onChange={(v) => setSpendBulkState(v as RuleConditionState)}
+                          />
+                          <Select
+                            label="VIP (Y) state"
+                            options={stateOptions}
+                            value={spendVipState}
+                            onChange={(v) => setSpendVipState(v as RuleConditionState)}
+                          />
+                          <Select
+                            label="First-order (Z) state"
+                            options={stateOptions}
+                            value={spendFirstState}
+                            onChange={(v) => setSpendFirstState(v as RuleConditionState)}
+                          />
+                        </FormLayout.Group>
+                      </FormLayout>
+                    )}
+                  </BlockStack>
+                </Card>
+              </BlockStack>
             </Layout.Section>
           )}
 
@@ -816,7 +1045,9 @@ export default function DiscountConfigRoute() {
             <Layout.Section>
               <Card>
                 <BlockStack gap="300">
-                  <Text as="h3" variant="headingSm">Current Saved Config</Text>
+                  <Text as="h3" variant="headingSm">
+                    Current Saved Config
+                  </Text>
                   <List type="bullet">
                     <List.Item>
                       Item rules: {config.item_collection_rules.length} —{" "}
@@ -826,8 +1057,8 @@ export default function DiscountConfigRoute() {
                     </List.Item>
                     <List.Item>
                       HVAC:{" "}
-                      <Badge tone={config.hvac_rule.enabled ? "success" : "attention"}>
-                        {config.hvac_rule.enabled ? "Enabled" : "Disabled"}
+                      <Badge tone={config.toggles.hvac_enabled ? "success" : "attention"}>
+                        {config.toggles.hvac_enabled ? "Enabled" : "Disabled"}
                       </Badge>
                       {" — "}
                       {config.hvac_rule.indoor_product_ids.length} indoor /{" "}
@@ -835,17 +1066,31 @@ export default function DiscountConfigRoute() {
                     </List.Item>
                     <List.Item>
                       Collection spend:{" "}
-                      <Badge tone={config.collection_spend_rule.enabled ? "success" : "attention"}>
-                        {config.collection_spend_rule.enabled ? "Enabled" : "Disabled"}
+                      <Badge tone={config.toggles.collection_spend_enabled ? "success" : "attention"}>
+                        {config.toggles.collection_spend_enabled ? "Enabled" : "Disabled"}
                       </Badge>
+                      {" — mode: "}
+                      {config.collection_spend_rule.activation.mode}
                       {" — "}
                       {config.collection_spend_rule.product_ids.length} product IDs
                     </List.Item>
-                    <List.Item>Storage: shop metafields (smart_discount_engine/config + parts 1–6)</List.Item>
+                    <List.Item>
+                      Block if discount code entered:{" "}
+                      {config.block_if_any_entered_discount_code ? "Yes" : "No"}
+                    </List.Item>
+                    <List.Item>
+                      Return conflict codes:{" "}
+                      {config.return_conflict_enabled
+                        ? config.return_blocked_codes.join(", ")
+                        : "disabled"}
+                    </List.Item>
+                    <List.Item>
+                      Storage: shop metafields (smart_discount_engine/config + parts 1–6)
+                    </List.Item>
                   </List>
                   <Text as="p" variant="bodyMd" tone="subdued">
-                    Config is chunked at 50KB per metafield part. Max 6 parts = 300KB capacity.
-                    The checkout function reads these at runtime with no Shopify query complexity cost.
+                    Config is chunked at 45 KB per part. Max 6 parts = 270 KB capacity. The
+                    checkout function reads these at runtime with no Shopify query complexity cost.
                   </Text>
                 </BlockStack>
               </Card>
