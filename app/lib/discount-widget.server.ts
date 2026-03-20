@@ -1110,7 +1110,8 @@ export async function applyShadowCartExactPricing({
     );
 
     for (const result of previewResults) {
-      if (!Number.isFinite(result.exactSubtotal) || result.exactSubtotal < baseSubtotal) continue;
+      // Keep scenarios where subtotal drops after add: that indicates unlocked discounts.
+      if (!Number.isFinite(result.exactSubtotal) || result.exactSubtotal < 0) continue;
 
       const variantIndex = recommendation.variants.findIndex(
         (entry) => String(entry.variantId) === String(result.variantId),
