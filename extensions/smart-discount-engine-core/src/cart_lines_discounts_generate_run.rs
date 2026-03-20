@@ -297,10 +297,13 @@ fn cart_lines_discounts_generate_run(
         .discount()
         .discount_classes()
         .contains(&schema::DiscountClass::Product);
-
-    if !has_product_discount_class {
-        return Ok(schema::CartLinesDiscountsGenerateRunResult { operations: vec![] });
-    }
+    log!(
+        "[sde-runtime] has_product_discount_class={} item_rules={} hvac_rules={} other_products={}",
+        has_product_discount_class,
+        config.item_collection_rules.len(),
+        config.hvac_rule.combination_rules.len(),
+        config.collection_spend_rule.product_ids.len()
+    );
 
     let entered_codes: Vec<String> = input
         .entered_discount_codes()
