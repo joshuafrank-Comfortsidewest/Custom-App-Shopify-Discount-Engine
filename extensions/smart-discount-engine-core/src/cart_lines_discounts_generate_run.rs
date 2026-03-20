@@ -285,24 +285,30 @@ fn cart_lines_discounts_generate_run(
             .app_function_config_part_3_metafield()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
-        discount
-            .app_function_config_part_4_metafield()
-            .map(|metafield| metafield.value())
-            .map(|value| value.as_str()),
     ];
     let discount_metafield_json = resolve_runtime_config_json(
         app_function_config_metafield_json,
         &app_function_config_chunk_values,
     );
-    let shop_metafield_json = input
+    let shop_app_metafield_json = input
         .shop()
         .app_runtime_config_metafield()
         .map(|metafield| metafield.value())
         .map(|value| value.to_string())
         .filter(|value| !value.is_empty());
-    let metafield_json = discount_metafield_json.or(shop_metafield_json);
+    let shop_legacy_metafield_json = input
+        .shop()
+        .legacy_runtime_config_metafield()
+        .map(|metafield| metafield.value())
+        .map(|value| value.to_string())
+        .filter(|value| !value.is_empty());
 
-    let config = runtime_config(metafield_json.as_deref());
+    // Prefer shop-level mirrors first (latest write path for large configs),
+    // then fall back to discount-owned runtime metafields.
+    let config = parse_runtime_config(shop_app_metafield_json.as_deref())
+        .or_else(|| parse_runtime_config(shop_legacy_metafield_json.as_deref()))
+        .or_else(|| parse_runtime_config(discount_metafield_json.as_deref()))
+        .unwrap_or_default();
 
     let entered_codes: Vec<String> = input
         .entered_discount_codes()
@@ -954,10 +960,9 @@ fn bulk_percent(adjusted_subtotal: f64, config: &RuntimeConfig) -> f64 {
     }
 }
 
-fn runtime_config(raw_json: Option<&str>) -> RuntimeConfig {
+fn parse_runtime_config(raw_json: Option<&str>) -> Option<RuntimeConfig> {
     raw_json
         .and_then(|raw| serde_json::from_str::<RuntimeConfig>(raw).ok())
-        .unwrap_or_default()
 }
 
 fn resolve_runtime_config_json(primary: Option<&str>, chunks: &[Option<&str>]) -> Option<String> {

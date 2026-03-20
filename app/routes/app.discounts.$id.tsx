@@ -1012,7 +1012,7 @@ async function persistConfig(
         }
       }
     }
-    if (runtimeMetafields.length > 0 && cleanedShopOwnerId) {
+    if (cleanedShopOwnerId && runtimePayload) {
       runtimeMirrorMetafields.push(
         {
           ownerId: cleanedShopOwnerId,
@@ -1084,7 +1084,7 @@ async function persistConfig(
     runtimePersistSucceeded = runtimeUserErrors.length === 0 && runtimeGraphQLErrors.length === 0;
   }
 
-  if (runtimePersistSucceeded && runtimeMirrorMetafields.length > 0) {
+  if (runtimeMirrorMetafields.length > 0) {
     const mirrorJson = await setMetafields(runtimeMirrorMetafields);
     for (const e of mirrorJson?.data?.metafieldsSet?.userErrors ?? []) {
       userErrors.push({
