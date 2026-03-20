@@ -657,7 +657,10 @@ async function tagsRemove(admin: any, productId: string, tags: string[]): Promis
 }
 
 const FUNCTION_CONFIG_MAX_BYTES = 10_000;
-const FUNCTION_CONFIG_CHUNK_MAX_BYTES = 20_000;
+const ADMIN_CONFIG_CHUNK_MAX_BYTES = 20_000;
+// Checkout function input query currently fetches up to 3 runtime chunk keys.
+// Keep runtime chunks large so oversized payloads still fit within those 3 parts.
+const RUNTIME_CONFIG_CHUNK_MAX_BYTES = 60_000;
 const FUNCTION_CONFIG_KEY = "function-configuration";
 const ADMIN_CONFIG_KEY = "admin-configuration";
 const FUNCTION_CONFIG_CHUNK_KEY_PREFIX = "function-configuration-part-";
@@ -951,7 +954,7 @@ async function persistConfig(
       value: payload,
     });
   } else {
-    const chunks = splitUtf8ByBytes(payload, FUNCTION_CONFIG_CHUNK_MAX_BYTES);
+    const chunks = splitUtf8ByBytes(payload, ADMIN_CONFIG_CHUNK_MAX_BYTES);
     if (chunks.length > ADMIN_CONFIG_MAX_CHUNKS) {
       adminWarning = `Admin settings are too large (${adminBytes} bytes). Reduce Auto Tagging history or number of very large rules, then save again.`;
     } else {
@@ -987,7 +990,7 @@ async function persistConfig(
         });
       }
     } else {
-      const chunks = splitUtf8ByBytes(runtimePayload, FUNCTION_CONFIG_CHUNK_MAX_BYTES);
+      const chunks = splitUtf8ByBytes(runtimePayload, RUNTIME_CONFIG_CHUNK_MAX_BYTES);
       if (chunks.length > FUNCTION_CONFIG_MAX_CHUNKS) {
         runtimeWarning = `Runtime function config is too large (${runtimeBytes} bytes). Settings were saved, but checkout runtime was not updated. Reduce selected item/HVAC products or use fewer large collection rules, then save again.`;
       } else {

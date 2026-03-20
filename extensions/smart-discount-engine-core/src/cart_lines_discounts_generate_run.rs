@@ -961,28 +961,32 @@ fn bulk_percent(adjusted_subtotal: f64, config: &RuntimeConfig) -> f64 {
 }
 
 fn parse_runtime_config(raw_json: Option<&str>) -> Option<RuntimeConfig> {
-    raw_json
-        .and_then(|raw| serde_json::from_str::<RuntimeConfig>(raw).ok())
+    let raw = raw_json?;
+    serde_json::from_str::<RuntimeConfig>(raw).ok().or_else(|| {
+        serde_json::from_str::<String>(raw)
+            .ok()
+            .and_then(|decoded| serde_json::from_str::<RuntimeConfig>(&decoded).ok())
+    })
 }
 
 fn resolve_runtime_config_json(primary: Option<&str>, chunks: &[Option<&str>]) -> Option<String> {
     if let Some(raw) = primary {
         if let Ok(manifest) = serde_json::from_str::<RuntimeConfigChunkManifest>(raw) {
             if manifest.chunked {
-                let mut joined = String::new();
-                let parts = manifest.parts.min(chunks.len());
-                for idx in 0..parts {
-                    if let Some(part) = chunks[idx] {
-                        if !part.is_empty() {
-                            joined.push_str(part);
-                        }
-                    }
+                if manifest.parts == 0 || manifest.parts > chunks.len() {
+                    return None;
                 }
-                return if joined.is_empty() {
-                    None
-                } else {
-                    Some(joined)
-                };
+                let mut joined = String::new();
+                for idx in 0..manifest.parts {
+                    let Some(part) = chunks[idx] else {
+                        return None;
+                    };
+                    if part.is_empty() {
+                        return None;
+                    }
+                    joined.push_str(part);
+                }
+                return Some(joined);
             }
         }
         if !raw.is_empty() {
