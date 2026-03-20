@@ -42,11 +42,5 @@ query Input {
     runtimeConfigPart6: metafield(namespace: "smart_discount_engine", key: "config-part-6") {
       value
     }
-    runtimeConfigPart7: metafield(namespace: "smart_discount_engine", key: "config-part-7") {
-      value
-    }
-    runtimeConfigPart8: metafield(namespace: "smart_discount_engine", key: "config-part-8") {
-      value
-    }
   }
 }

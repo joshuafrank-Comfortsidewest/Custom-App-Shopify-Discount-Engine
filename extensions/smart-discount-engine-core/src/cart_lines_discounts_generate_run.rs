@@ -172,12 +172,6 @@ fn cart_lines_discounts_generate_run(
         shop.runtime_config_part_6()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
-        shop.runtime_config_part_7()
-            .map(|metafield| metafield.value())
-            .map(|value| value.as_str()),
-        shop.runtime_config_part_8()
-            .map(|metafield| metafield.value())
-            .map(|value| value.as_str()),
     ];
 
     let runtime_config_json =
