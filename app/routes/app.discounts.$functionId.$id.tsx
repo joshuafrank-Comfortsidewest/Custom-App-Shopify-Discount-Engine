@@ -12,7 +12,6 @@ type LoaderData = {
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
-
   return json<LoaderData>({
     functionId: params.functionId ?? "",
     id: params.id ?? "",
@@ -30,16 +29,16 @@ export default function DiscountDetailsRoute() {
           <Card>
             <BlockStack gap="300">
               <Text as="h2" variant="headingMd">
-                Discount created
+                Discount Created
+              </Text>
+              <Text as="p" variant="bodyMd">
+                Discount ID: {data.id || "unknown"}
               </Text>
               <Text as="p" variant="bodyMd">
                 Function ID: {data.functionId || "unknown"}
               </Text>
               <Text as="p" variant="bodyMd">
-                Discount node ID: {data.id || "unknown"}
-              </Text>
-              <Text as="p" variant="bodyMd">
-                Continue on the Discounts page to verify runtime status and test checkout.
+                Continue on the Discounts page to configure and validate runtime behavior.
               </Text>
             </BlockStack>
           </Card>

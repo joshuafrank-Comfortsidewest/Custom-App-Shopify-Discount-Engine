@@ -1,15 +1,44 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { redirect } from "@remix-run/node";
+import { json } from "@remix-run/node";
+import { useLoaderData } from "@remix-run/react";
+import { Page, Layout, Card, Text, BlockStack } from "@shopify/polaris";
+import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
-
-  // Compatibility route for previously-created discounts that still resolve
-  // to /app/discounts/:id from older app versions.
-  return redirect("/app/discounts");
+type LoaderData = {
+  id: string;
 };
 
-export default function LegacyDiscountDetailsRedirect() {
-  return null;
+export const loader = async ({ request, params }: LoaderFunctionArgs) => {
+  await authenticate.admin(request);
+  return json<LoaderData>({
+    id: params.id ?? "",
+  });
+};
+
+export default function DiscountLegacyDetailsRoute() {
+  const data = useLoaderData<typeof loader>() as LoaderData;
+
+  return (
+    <Page>
+      <TitleBar title="Discount Details" />
+      <Layout>
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="300">
+              <Text as="h2" variant="headingMd">
+                Discount Created
+              </Text>
+              <Text as="p" variant="bodyMd">
+                Discount ID: {data.id || "unknown"}
+              </Text>
+              <Text as="p" variant="bodyMd">
+                Continue on the Discounts page to configure and validate runtime behavior.
+              </Text>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+      </Layout>
+    </Page>
+  );
 }
