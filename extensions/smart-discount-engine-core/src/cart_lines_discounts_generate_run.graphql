@@ -2,7 +2,6 @@ query Input {
   cart {
     buyerIdentity {
       customer {
-        id
         numberOfOrders
         vipTags: hasTags(
           tags: [
@@ -47,7 +46,6 @@ query Input {
       merchandise {
         __typename
         ... on ProductVariant {
-          id
           sku
           product {
             id
