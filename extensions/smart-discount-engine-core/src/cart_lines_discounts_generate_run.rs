@@ -207,6 +207,12 @@ fn cart_lines_discounts_generate_run(
     let (first_order_percent, vip_percent) = compute_customer_percents(&input, &config);
     let item_percents_by_product = build_product_item_percents(&config);
     let hvac_active_rules = active_hvac_rules(&input, &config);
+    let cart_subtotal: f64 = input
+        .cart()
+        .lines()
+        .iter()
+        .map(|line| line.cost().subtotal_amount().amount().0)
+        .sum();
 
     let mut candidates: Vec<schema::ProductDiscountCandidate> = vec![];
 
@@ -232,7 +238,7 @@ fn cart_lines_discounts_generate_run(
             .get(&product_id)
             .copied()
             .unwrap_or(0.0);
-        let bulk_percent = compute_bulk_percent(&config, line_qty);
+        let bulk_percent = compute_bulk_percent(&config, cart_subtotal);
         let base_percent = item_percent
             .max(bulk_percent)
             .max(first_order_percent)
@@ -257,13 +263,13 @@ fn cart_lines_discounts_generate_run(
                 if *fixed_on_line <= 0 {
                     continue;
                 }
-                if rule.stack_mode == "stackable" {
-                    hvac_fixed_stackable_qty += *fixed_on_line;
-                    hvac_fixed_stackable_amount_total +=
-                        (*fixed_on_line as f64) * rule.amount_off_outdoor_per_bundle;
-                } else {
+                if rule.stack_mode == "exclusive_best" {
                     hvac_fixed_exclusive_qty += *fixed_on_line;
                     hvac_fixed_exclusive_amount_total +=
+                        (*fixed_on_line as f64) * rule.amount_off_outdoor_per_bundle;
+                } else {
+                    hvac_fixed_stackable_qty += *fixed_on_line;
+                    hvac_fixed_stackable_amount_total +=
                         (*fixed_on_line as f64) * rule.amount_off_outdoor_per_bundle;
                 }
             }
@@ -408,7 +414,16 @@ fn active_hvac_rules(
     input: &schema::cart_lines_discounts_generate_run::Input,
     config: &RuntimeConfig,
 ) -> Vec<HvacActiveRule> {
-    if !config.hvac_rule.enabled && !config.toggles.hvac_enabled {
+    // Legacy-safe behavior:
+    // older saved configs can carry populated HVAC rules while both enable flags are false.
+    // If rules are configured, still evaluate them so checkout behavior doesn't silently drop.
+    let has_configured_hvac_rules = !config.hvac_rule.combination_rules.is_empty()
+        || (!config.hvac_rule.outdoor_product_ids.is_empty()
+            && !config.hvac_rule.indoor_product_ids.is_empty()
+            && (config.hvac_rule.percent_off_hvac_products > 0.0
+                || config.hvac_rule.amount_off_outdoor_per_bundle > 0.0));
+
+    if !config.hvac_rule.enabled && !config.toggles.hvac_enabled && !has_configured_hvac_rules {
         return vec![];
     }
 
@@ -456,17 +471,33 @@ fn active_hvac_rules(
     let mut evaluated_rules: Vec<HvacActiveRule> = vec![];
 
     for rule in candidate_rules.iter() {
-        if !rule.enabled || rule.indoor_product_ids.is_empty() || rule.outdoor_product_ids.is_empty() {
+        if !rule.enabled {
             continue;
         }
 
-        let outdoor_products: HashSet<String> = rule
-            .outdoor_product_ids
+        // Legacy-safe fallback:
+        // some saved combo rules may intentionally leave indoor/outdoor lists empty and rely on
+        // global HVAC mapped IDs. Keep those rules functional instead of dropping them.
+        let outdoor_source_ids = if rule.outdoor_product_ids.is_empty() {
+            &config.hvac_rule.outdoor_product_ids
+        } else {
+            &rule.outdoor_product_ids
+        };
+        let indoor_source_ids = if rule.indoor_product_ids.is_empty() {
+            &config.hvac_rule.indoor_product_ids
+        } else {
+            &rule.indoor_product_ids
+        };
+
+        if indoor_source_ids.is_empty() || outdoor_source_ids.is_empty() {
+            continue;
+        }
+
+        let outdoor_products: HashSet<String> = outdoor_source_ids
             .iter()
             .map(|pid| normalize_product_id(pid))
             .collect();
-        let indoor_products: HashSet<String> = rule
-            .indoor_product_ids
+        let indoor_products: HashSet<String> = indoor_source_ids
             .iter()
             .map(|pid| normalize_product_id(pid))
             .collect();
@@ -688,21 +719,21 @@ fn vip_percent_from_tag(tag: &str) -> Option<f64> {
     }
 }
 
-fn compute_bulk_percent(config: &RuntimeConfig, line_qty: i32) -> f64 {
-    if !config.toggles.bulk_enabled || line_qty <= 0 {
+fn compute_bulk_percent(config: &RuntimeConfig, cart_subtotal: f64) -> f64 {
+    if !config.toggles.bulk_enabled || cart_subtotal <= 0.0 {
         return 0.0;
     }
 
     let tiers = [
-        (config.bulk5_min, config.bulk5_percent),
-        (config.bulk10_min, config.bulk10_percent),
-        (config.bulk13_min, config.bulk13_percent),
-        (config.bulk15_min, config.bulk15_percent),
+        (config.bulk5_min as f64, config.bulk5_percent),
+        (config.bulk10_min as f64, config.bulk10_percent),
+        (config.bulk13_min as f64, config.bulk13_percent),
+        (config.bulk15_min as f64, config.bulk15_percent),
     ];
 
     let mut best = 0.0;
     for (min_qty, percent) in tiers {
-        if min_qty > 0 && line_qty >= min_qty && percent > best {
+        if min_qty > 0.0 && cart_subtotal >= min_qty && percent > best {
             best = percent;
         }
     }

@@ -50,7 +50,7 @@ type HvacCombinationRule = {
   max_indoor_per_outdoor: number;
   percent_off_hvac_products: number;
   amount_off_outdoor_per_bundle: number;
-  stack_mode: "independent" | "shared";
+  stack_mode: "stackable" | "exclusive_best" | "independent" | "shared";
 };
 
 type HvacRule = {
@@ -310,6 +310,36 @@ function parseShopConfig(primary: string | null, parts: Array<string | null>): R
   }
 }
 
+type HvacCompatMapping = {
+  sourceSku: string;
+  sourceBrand?: string | null;
+  sourceSystem?: string | null;
+};
+
+function normalizeCompare(value: string | null | undefined): string {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function extractRefrigerant(value: string | null | undefined): string {
+  const upper = normalizeCompare(value);
+  if (!upper) return "";
+  const match = upper.match(/R\s*-?\s*\d{3,4}[A-Z]?/);
+  return match ? match[0].replace(/[\s-]/g, "") : "";
+}
+
+function isIndoorCompatibleWithOutdoor(
+  indoor: HvacCompatMapping,
+  outdoor: HvacCompatMapping,
+): boolean {
+  const indoorBrand = normalizeCompare(indoor.sourceBrand);
+  const outdoorBrand = normalizeCompare(outdoor.sourceBrand);
+  const indoorRef = extractRefrigerant(indoor.sourceSystem);
+  const outdoorRef = extractRefrigerant(outdoor.sourceSystem);
+
+  if (!indoorBrand || !outdoorBrand || !indoorRef || !outdoorRef) return false;
+  return indoorBrand === outdoorBrand && indoorRef === outdoorRef;
+}
+
 function chunkConfig(config: RuntimeConfig): { manifest: string; parts: string[] } {
   const fullJson = JSON.stringify(config);
   if (Buffer.byteLength(fullJson, "utf8") <= CHUNK_SIZE) {
@@ -462,22 +492,49 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   // Build a SKU → product ID lookup for combination rules
   const skuToProductId = new Map<string, string>();
+  const indoorBySku = new Map<string, (typeof allHvacMappings)[number]>();
+  const outdoorBySku = new Map<string, (typeof allHvacMappings)[number]>();
   for (const m of allHvacMappings) {
     if (m.mappedProductId) {
-      skuToProductId.set(m.sourceSku.toUpperCase(), m.mappedProductId);
+      const skuKey = normalizeCompare(m.sourceSku);
+      skuToProductId.set(skuKey, m.mappedProductId);
+      if (m.sourceType === "indoor") indoorBySku.set(skuKey, m);
+      if (m.sourceType === "outdoor") outdoorBySku.set(skuKey, m);
     }
   }
 
   // Resolve combination rules: convert SKUs to product IDs
   const combination_rules = (hvacBase.combination_rules ?? []).map((rule) => {
-    const outdoorPid = rule.outdoor_source_sku
-      ? skuToProductId.get(rule.outdoor_source_sku.toUpperCase())
+    const outdoorSkuKey = normalizeCompare(rule.outdoor_source_sku);
+    const outdoorMapping = outdoorSkuKey ? outdoorBySku.get(outdoorSkuKey) : undefined;
+    const outdoorPid = outdoorSkuKey
+      ? skuToProductId.get(outdoorSkuKey)
       : undefined;
+
+    const compatibleIndoorSkuSet = new Set(
+      outdoorMapping
+        ? Array.from(indoorBySku.values())
+            .filter((indoor) => isIndoorCompatibleWithOutdoor(indoor, outdoorMapping))
+            .map((indoor) => normalizeCompare(indoor.sourceSku))
+        : [],
+    );
+
+    const requestedIndoorSkus = (rule.allowed_indoor_skus ?? []).map((sku: string) =>
+      normalizeCompare(sku),
+    );
+
+    const effectiveIndoorSkus =
+      compatibleIndoorSkuSet.size > 0
+        ? requestedIndoorSkus.length > 0
+          ? requestedIndoorSkus.filter((sku) => compatibleIndoorSkuSet.has(sku))
+          : Array.from(compatibleIndoorSkuSet)
+        : [];
+
     return {
       ...rule,
       outdoor_product_ids: outdoorPid ? [outdoorPid] : [] as string[],
-      indoor_product_ids: (rule.allowed_indoor_skus ?? [])
-        .map((sku: string) => skuToProductId.get(sku.toUpperCase()))
+      indoor_product_ids: effectiveIndoorSkus
+        .map((sku: string) => skuToProductId.get(sku))
         .filter((x): x is string => Boolean(x)),
     };
   });
@@ -591,12 +648,14 @@ type CombinationRuleState = {
   max_indoor_per_outdoor: string;
   percent_off_hvac_products: string;
   amount_off_outdoor_per_bundle: string;
-  stack_mode: "independent" | "shared";
+  stack_mode: string;
 };
 
 export default function DiscountConfigRoute() {
   const { config, collections, indoorMappings, outdoorMappings } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
+  const indoorMappingEntries = indoorMappings as HvacMappingEntry[];
+  const outdoorMappingEntries = outdoorMappings as HvacMappingEntry[];
 
   const formRef = useRef<HTMLFormElement>(null);
   const configInputRef = useRef<HTMLInputElement>(null);
@@ -644,6 +703,12 @@ export default function DiscountConfigRoute() {
   // HVAC combination rules (per-condenser)
   const [comboRules, setComboRules] = useState<CombinationRuleState[]>(
     (config.hvac_rule.combination_rules ?? []).map((r: any) => ({
+      // Normalize older values ("independent"/"shared") to the current runtime modes.
+      // Any non-exclusive mode behaves as stackable in the function.
+      stack_mode:
+        String(r.stack_mode ?? "").trim() === "exclusive_best"
+          ? "exclusive_best"
+          : "stackable",
       name: r.name ?? "",
       enabled: r.enabled ?? true,
       outdoor_source_sku: r.outdoor_source_sku ?? "",
@@ -652,7 +717,6 @@ export default function DiscountConfigRoute() {
       max_indoor_per_outdoor: String(r.max_indoor_per_outdoor ?? 6),
       percent_off_hvac_products: String(r.percent_off_hvac_products ?? 0),
       amount_off_outdoor_per_bundle: String(r.amount_off_outdoor_per_bundle ?? 0),
-      stack_mode: r.stack_mode ?? "independent",
     })),
   );
 
@@ -683,6 +747,16 @@ export default function DiscountConfigRoute() {
   const [spendFirstState, setSpendFirstState] = useState<RuleConditionState>(act.first_state);
 
   const [section, setSection] = useState<Section>("order");
+
+  const getCompatibleIndoorMappings = (outdoorSku: string): HvacMappingEntry[] => {
+    const outdoor = outdoorMappingEntries.find(
+      (m) => normalizeCompare(m.sourceSku) === normalizeCompare(outdoorSku),
+    );
+    if (!outdoor) return [];
+    return indoorMappingEntries.filter((indoor) =>
+      isIndoorCompatibleWithOutdoor(indoor, outdoor),
+    );
+  };
 
   const collectionOptions = [
     { label: "— Select collection —", value: "" },
@@ -1065,7 +1139,7 @@ export default function DiscountConfigRoute() {
                               max_indoor_per_outdoor: "6",
                               percent_off_hvac_products: String(hvacPercent),
                               amount_off_outdoor_per_bundle: String(hvacAmountOff),
-                              stack_mode: "independent",
+                              stack_mode: "stackable",
                             },
                           ])
                         }
@@ -1078,7 +1152,16 @@ export default function DiscountConfigRoute() {
                       a specific condenser and its permitted indoor units with custom discount settings.
                     </Text>
 
-                    {comboRules.map((rule, idx) => (
+                    {comboRules.map((rule, idx) => {
+                      const compatibleIndoorMappings = getCompatibleIndoorMappings(
+                        rule.outdoor_source_sku,
+                      );
+                      const compatibleIndoorSkus = compatibleIndoorMappings.map((m) => m.sourceSku);
+                      const selectedIndoorCount = rule.allowed_indoor_skus.filter((sku) =>
+                        compatibleIndoorSkus.includes(sku),
+                      ).length;
+
+                      return (
                       <Card key={`combo-${idx}`}>
                         <BlockStack gap="300">
                           <InlineStack align="space-between" blockAlign="center">
@@ -1123,7 +1206,7 @@ export default function DiscountConfigRoute() {
                             label="Outdoor Condenser (SKU)"
                             options={[
                               { label: "— Select condenser —", value: "" },
-                              ...(outdoorMappings as HvacMappingEntry[]).map((m) => ({
+                              ...outdoorMappingEntries.map((m) => ({
                                 label: `${m.sourceSku} — ${m.sourceBrand ?? ""} ${m.mappedProductTitle ?? ""}`,
                                 value: m.sourceSku,
                               })),
@@ -1131,15 +1214,25 @@ export default function DiscountConfigRoute() {
                             value={rule.outdoor_source_sku}
                             onChange={(v) =>
                               setComboRules((p) =>
-                                p.map((r, i) =>
-                                  i === idx ? { ...r, outdoor_source_sku: v } : r,
-                                ),
+                                p.map((r, i) => {
+                                  if (i !== idx) return r;
+                                  const allowedPool = getCompatibleIndoorMappings(v).map(
+                                    (m) => m.sourceSku,
+                                  );
+                                  return {
+                                    ...r,
+                                    outdoor_source_sku: v,
+                                    allowed_indoor_skus: r.allowed_indoor_skus.filter((sku) =>
+                                      allowedPool.includes(sku),
+                                    ),
+                                  };
+                                }),
                               )
                             }
                           />
 
                           <Text as="p" variant="bodyMd">
-                            Allowed Indoor Heads ({rule.allowed_indoor_skus.length} selected)
+                            Allowed Indoor Heads ({selectedIndoorCount} selected)
                           </Text>
                           <div style={{ maxHeight: 200, overflowY: "auto", border: "1px solid #ddd", borderRadius: 4, padding: 8 }}>
                             <BlockStack gap="100">
@@ -1152,7 +1245,7 @@ export default function DiscountConfigRoute() {
                                         i === idx
                                           ? {
                                               ...r,
-                                              allowed_indoor_skus: (indoorMappings as HvacMappingEntry[]).map(
+                                              allowed_indoor_skus: compatibleIndoorMappings.map(
                                                 (m) => m.sourceSku,
                                               ),
                                             }
@@ -1176,7 +1269,17 @@ export default function DiscountConfigRoute() {
                                   Clear All
                                 </Button>
                               </InlineStack>
-                              {(indoorMappings as HvacMappingEntry[]).map((m) => (
+                              {!rule.outdoor_source_sku && (
+                                <Text as="p" variant="bodySm" tone="subdued">
+                                  Select an outdoor condenser first.
+                                </Text>
+                              )}
+                              {rule.outdoor_source_sku && compatibleIndoorMappings.length === 0 && (
+                                <Text as="p" variant="bodySm" tone="subdued">
+                                  No indoor mappings match this condenser brand + refrigerant.
+                                </Text>
+                              )}
+                              {compatibleIndoorMappings.map((m) => (
                                 <Checkbox
                                   key={m.sourceSku}
                                   label={`${m.sourceSku} — ${m.sourceBrand ?? ""} ${m.sourceSystem ?? ""} ${m.sourceBtu ? m.sourceBtu + " BTU" : ""}`}
@@ -1261,15 +1364,15 @@ export default function DiscountConfigRoute() {
                             <Select
                               label="Stack Mode"
                               options={[
-                                { label: "Independent (each condenser is separate)", value: "independent" },
-                                { label: "Shared (all condensers share indoor pool)", value: "shared" },
+                                { label: "Stackable", value: "stackable" },
+                                { label: "Exclusive best rule only", value: "exclusive_best" },
                               ]}
                               value={rule.stack_mode}
                               onChange={(v) =>
                                 setComboRules((p) =>
                                   p.map((r, i) =>
                                     i === idx
-                                      ? { ...r, stack_mode: v as "independent" | "shared" }
+                                      ? { ...r, stack_mode: v }
                                       : r,
                                   ),
                                 )
@@ -1278,7 +1381,8 @@ export default function DiscountConfigRoute() {
                           </FormLayout>
                         </BlockStack>
                       </Card>
-                    ))}
+                      );
+                    })}
 
                     {comboRules.length === 0 && (
                       <Text as="p" variant="bodyMd" tone="subdued">
