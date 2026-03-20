@@ -289,10 +289,38 @@ fn cart_lines_discounts_generate_run(
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
     ];
-    let runtime_config_json = resolve_runtime_config_json(
+    let discount_runtime_config_json = resolve_runtime_config_json(
         runtime_config_metafield_json.as_deref(),
         &runtime_config_chunk_values,
     );
+    let shop = input.shop();
+    let shop_runtime_config_metafield_json = shop
+        .shop_runtime_config_metafield()
+        .map(|metafield| metafield.value())
+        .map(|value| value.to_string());
+    let shop_runtime_config_chunk_values = [
+        shop
+            .shop_runtime_config_part_1_metafield()
+            .map(|metafield| metafield.value())
+            .map(|value| value.as_str()),
+        shop
+            .shop_runtime_config_part_2_metafield()
+            .map(|metafield| metafield.value())
+            .map(|value| value.as_str()),
+        shop
+            .shop_runtime_config_part_3_metafield()
+            .map(|metafield| metafield.value())
+            .map(|value| value.as_str()),
+        shop
+            .shop_runtime_config_part_4_metafield()
+            .map(|metafield| metafield.value())
+            .map(|value| value.as_str()),
+    ];
+    let shop_runtime_config_json = resolve_runtime_config_json(
+        shop_runtime_config_metafield_json.as_deref(),
+        &shop_runtime_config_chunk_values,
+    );
+    let runtime_config_json = discount_runtime_config_json.or(shop_runtime_config_json);
     let config = parse_runtime_config(runtime_config_json.as_deref()).unwrap_or_default();
 
     let entered_codes: Vec<String> = input
