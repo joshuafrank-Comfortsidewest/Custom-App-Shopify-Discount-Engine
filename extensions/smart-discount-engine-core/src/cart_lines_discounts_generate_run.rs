@@ -452,24 +452,41 @@ fn cart_lines_discounts_generate_run(
             }
         }
 
+        // Guard against invalid overlapping targets: cap all fixed-qty discounts to line quantity.
+        let mut hvac_fixed_exclusive_qty_capped = hvac_fixed_exclusive_qty.max(0).min(line_qty.max(0));
+        let mut hvac_fixed_stackable_qty_capped = hvac_fixed_stackable_qty.max(0);
+        let mut fixed_qty_capped = fixed_qty.max(0);
+
+        // If exclusive fixed applies, prefer it and disable stackable fixed on the same line.
+        if hvac_fixed_exclusive_qty_capped > 0 {
+            hvac_fixed_stackable_qty_capped = 0;
+            hvac_fixed_stackable_amount_total = 0.0;
+        } else {
+            hvac_fixed_stackable_qty_capped =
+                hvac_fixed_stackable_qty_capped.min(line_qty.max(0));
+        }
+
+        let fixed_slots_left = (line_qty - hvac_fixed_exclusive_qty_capped - hvac_fixed_stackable_qty_capped).max(0);
+        fixed_qty_capped = fixed_qty_capped.min(fixed_slots_left);
+
         let base_percent_candidate = order_level_percent.max(item_percent);
         let hvac_percent_candidate = base_percent_candidate.max(hvac_percent_exclusive_best);
         let current_promo_source = current_promo_attribution(&discount_percents, item_percent);
-        if hvac_fixed_exclusive_qty > 0 {
+        if hvac_fixed_exclusive_qty_capped > 0 {
             let hvac_fixed_per_item =
-                hvac_fixed_exclusive_amount_total / (hvac_fixed_exclusive_qty as f64);
+                hvac_fixed_exclusive_amount_total / (hvac_fixed_exclusive_qty.max(1) as f64);
             let hvac_fixed_per_item_capped = hvac_fixed_per_item.min(line_unit_price).max(0.0);
             candidates.push(schema::ProductDiscountCandidate {
                 targets: vec![schema::ProductDiscountCandidateTarget::CartLine(
                     schema::CartLineTarget {
                         id: line.id().clone(),
-                        quantity: Some(hvac_fixed_exclusive_qty),
+                        quantity: Some(hvac_fixed_exclusive_qty_capped),
                     },
                 )],
                 message: Some(format!(
                     "Bundle discount: ${} off on {} outdoor unit(s)",
                     fmt_percent(hvac_fixed_per_item_capped),
-                    hvac_fixed_exclusive_qty
+                    hvac_fixed_exclusive_qty_capped
                 )),
                 value: schema::ProductDiscountCandidateValue::FixedAmount(
                     schema::ProductDiscountCandidateFixedAmount {
@@ -481,9 +498,9 @@ fn cart_lines_discounts_generate_run(
             });
         }
 
-        if hvac_fixed_stackable_qty > 0 {
+        if hvac_fixed_stackable_qty_capped > 0 {
             let hvac_fixed_per_item =
-                hvac_fixed_stackable_amount_total / (hvac_fixed_stackable_qty as f64);
+                hvac_fixed_stackable_amount_total / (hvac_fixed_stackable_qty.max(1) as f64);
             let after_hvac_price = (line_unit_price - hvac_fixed_per_item).max(0.0);
             // Apply selected percentage after HVAC fixed amount:
             // (unit_price - hvac_amount) -> then percentage.
@@ -495,20 +512,20 @@ fn cart_lines_discounts_generate_run(
                     "Bundle discount: ${} off + {}% on {} outdoor unit(s)",
                     fmt_percent(hvac_fixed_per_item),
                     fmt_percent(hvac_percent_candidate),
-                    hvac_fixed_stackable_qty
+                    hvac_fixed_stackable_qty_capped
                 )
             } else {
                 format!(
                     "Bundle discount: ${} off on {} outdoor unit(s)",
                     fmt_percent(hvac_fixed_per_item.min(line_unit_price).max(0.0)),
-                    hvac_fixed_stackable_qty
+                    hvac_fixed_stackable_qty_capped
                 )
             };
             candidates.push(schema::ProductDiscountCandidate {
                 targets: vec![schema::ProductDiscountCandidateTarget::CartLine(
                     schema::CartLineTarget {
                         id: line.id().clone(),
-                        quantity: Some(hvac_fixed_stackable_qty),
+                        quantity: Some(hvac_fixed_stackable_qty_capped),
                     },
                 )],
                 message: Some(message),
@@ -522,8 +539,8 @@ fn cart_lines_discounts_generate_run(
             });
         }
 
-        let hvac_fixed_qty_total = hvac_fixed_stackable_qty + hvac_fixed_exclusive_qty;
-        let remaining_qty: i32 = (line_qty - fixed_qty - hvac_fixed_qty_total).max(0);
+        let hvac_fixed_qty_total = hvac_fixed_stackable_qty_capped + hvac_fixed_exclusive_qty_capped;
+        let remaining_qty: i32 = (line_qty - fixed_qty_capped - hvac_fixed_qty_total).max(0);
         let hvac_percent_qty = remaining_qty.min(hvac_percent_units_requested.max(0));
         let non_hvac_percent_qty = (remaining_qty - hvac_percent_qty).max(0);
         let bundle_percent_contributed =
@@ -537,18 +554,18 @@ fn cart_lines_discounts_generate_run(
             current_promo_source.clone()
         };
 
-        if fixed_qty > 0 && fixed_amount_per_item > 0.0 {
+        if fixed_qty_capped > 0 && fixed_amount_per_item > 0.0 {
             candidates.push(schema::ProductDiscountCandidate {
                 targets: vec![schema::ProductDiscountCandidateTarget::CartLine(
                     schema::CartLineTarget {
                         id: line.id().clone(),
-                        quantity: Some(fixed_qty),
+                        quantity: Some(fixed_qty_capped),
                     },
                 )],
                 message: Some(format!(
                     "Accessories discount: ${} off on {} item(s)",
                     fmt_percent(fixed_amount_per_item),
-                    fixed_qty
+                    fixed_qty_capped
                 )),
                 value: schema::ProductDiscountCandidateValue::FixedAmount(
                     schema::ProductDiscountCandidateFixedAmount {
