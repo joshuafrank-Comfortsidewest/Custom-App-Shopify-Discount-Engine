@@ -754,7 +754,7 @@ function buildRuntimeFunctionConfig(config: DiscountConfig) {
           percent: normalizeNum(rule?.percent, 0),
           product_ids: compactProductIds(rule?.product_ids),
         }))
-        .filter((rule) => rule.collection_id && rule.percent > 0 && rule.product_ids.length > 0)
+        .filter((rule) => rule.percent > 0 && rule.product_ids.length > 0)
     : [];
 
   const runtimeCollectionSpendRule = otherRuleEnabled
@@ -2426,6 +2426,15 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     otherDiscountCollectionId: csCollectionId,
     otherDiscountProductCount: csProductIds.length,
     probeInItemRules,
+    runtimeItemRuleCount: Array.isArray(runtimePreview.item_collection_rules)
+      ? runtimePreview.item_collection_rules.length
+      : 0,
+    runtimeItemRuleProductCount: Array.isArray(runtimePreview.item_collection_rules)
+      ? runtimePreview.item_collection_rules.reduce(
+          (sum: number, rule: any) => sum + (Array.isArray(rule?.product_ids) ? rule.product_ids.length : 0),
+          0,
+        )
+      : 0,
     runtimePreviewBytes,
   });
 
