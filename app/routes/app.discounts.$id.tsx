@@ -1137,9 +1137,11 @@ async function loadDiscountOwnersAndConfig(admin: any, discountGid: string) {
           discount {
             __typename
             ... on DiscountAutomaticApp {
+              id
               discountId
             }
             ... on DiscountCodeApp {
+              id
               discountId
             }
           }
@@ -1151,7 +1153,7 @@ async function loadDiscountOwnersAndConfig(admin: any, discountGid: string) {
   const node = json?.data?.discountNode;
   const nodeId = String(node?.id ?? "").trim();
   const discountType = String(node?.discount?.__typename ?? "").trim();
-  const discountId = String(node?.discount?.discountId ?? "").trim();
+  const discountId = String(node?.discount?.id ?? node?.discount?.discountId ?? "").trim();
   const adminConfigRaw = resolveChunkedConfigJson(node?.adminConfiguration?.value, [
     node?.adminConfigurationPart1?.value,
     node?.adminConfigurationPart2?.value,
