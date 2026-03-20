@@ -266,25 +266,25 @@ impl Default for RuntimeConfig {
 fn cart_lines_discounts_generate_run(
     input: schema::cart_lines_discounts_generate_run::Input,
 ) -> Result<schema::CartLinesDiscountsGenerateRunResult> {
-    let discount = input.discount();
-    let runtime_config_metafield_json = discount
+    let shop = input.shop();
+    let runtime_config_metafield_json = shop
         .runtime_config_metafield()
         .map(|metafield| metafield.value())
         .map(|value| value.to_string());
     let runtime_config_chunk_values = [
-        discount
+        shop
             .runtime_config_part_1_metafield()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
-        discount
+        shop
             .runtime_config_part_2_metafield()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
-        discount
+        shop
             .runtime_config_part_3_metafield()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
-        discount
+        shop
             .runtime_config_part_4_metafield()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
