@@ -291,7 +291,11 @@ const inferIndoorHeadType = (opt: any) => {
   return "Indoor Head";
 };
 const normalizeHeadType = (raw: unknown) => String(raw ?? "").trim().toLowerCase();
-const norm = (raw: unknown) => String(raw ?? "").trim().toLowerCase();
+const norm = (raw: unknown) =>
+  String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
 const normalizeSkuPart = (raw: unknown) => {
   let s = String(raw ?? "").trim().toUpperCase().replace(/\s+/g, "");
   s = s.replace(/^(?:X\d+|\d+X)/i, "");
@@ -752,8 +756,8 @@ function buildRuntimeFunctionConfig(config: DiscountConfig) {
         .map((rule) => ({
           collection_id: String(rule?.collection_id ?? "").trim(),
           percent: normalizeNum(rule?.percent, 0),
-          // Keep runtime payload compact; item-rule matching is handled by product promo tags in function input.
-          product_ids: [],
+          // Preserve runtime product IDs so checkout logic can evaluate item rules directly.
+          product_ids: compactProductIds(rule?.product_ids),
         }))
         .filter((rule) => rule.percent > 0)
     : [];

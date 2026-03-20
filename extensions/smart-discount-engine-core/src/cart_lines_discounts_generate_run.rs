@@ -677,18 +677,19 @@ fn collection_spend_discountable_units(
     }
 
     let mut qty: f64 = 0.0;
+    let mut collection_subtotal: f64 = 0.0;
     for line in input.cart().lines().iter() {
         if let Merchandise::ProductVariant(variant) = line.merchandise() {
             let normalized_pid = normalize_product_id(variant.product().id());
             if product_set.contains(&normalized_pid) {
                 qty += *line.quantity() as f64;
+                collection_subtotal += line.cost().subtotal_amount().amount().0;
             }
         }
     }
 
-    let cart_subtotal = input.cart().cost().subtotal_amount().amount().0;
     compute_collection_spend_units(
-        cart_subtotal,
+        collection_subtotal,
         qty,
         rule.min_collection_qty,
         rule.spend_step_amount,
@@ -698,7 +699,7 @@ fn collection_spend_discountable_units(
 }
 
 fn compute_collection_spend_units(
-    cart_subtotal: f64,
+    collection_subtotal: f64,
     eligible_qty: f64,
     min_collection_qty: f64,
     spend_step_amount: f64,
@@ -710,11 +711,11 @@ fn compute_collection_spend_units(
     }
     let spend_step = spend_step_amount.max(0.01);
     let min_qty = min_collection_qty.max(1.0);
-    if eligible_qty < min_qty || cart_subtotal < spend_step {
+    if eligible_qty < min_qty || collection_subtotal < spend_step {
         return 0;
     }
 
-    let steps = (cart_subtotal / spend_step).floor() as i32;
+    let steps = (collection_subtotal / spend_step).floor() as i32;
     let eligible_units = eligible_qty.floor() as i32;
     let computed_units = steps.min(eligible_units).max(0);
     let max_units = if max_discounted_units_per_order > 0.0 {
