@@ -673,6 +673,21 @@ const SHOP_RUNTIME_APP_MIRROR_NAMESPACE = "$app:smart_discount_engine";
 const RUNTIME_OWNER_ID_PATTERN =
   /^gid:\/\/shopify\/Discount(?:(?:Automatic|Code)Node|Automatic|Code)\/\d+$/;
 
+function deriveRuntimeOwnerIdAliases(value: unknown): string[] {
+  const ownerId = String(value ?? "").trim();
+  if (!ownerId || !RUNTIME_OWNER_ID_PATTERN.test(ownerId)) return [];
+  const ids = new Set<string>([ownerId]);
+  const automaticNodeMatch = ownerId.match(/^gid:\/\/shopify\/DiscountAutomaticNode\/(\d+)$/);
+  if (automaticNodeMatch) {
+    ids.add(`gid://shopify/DiscountAutomatic/${automaticNodeMatch[1]}`);
+  }
+  const codeNodeMatch = ownerId.match(/^gid:\/\/shopify\/DiscountCodeNode\/(\d+)$/);
+  if (codeNodeMatch) {
+    ids.add(`gid://shopify/DiscountCode/${codeNodeMatch[1]}`);
+  }
+  return Array.from(ids);
+}
+
 function splitUtf8ByBytes(input: string, maxBytes: number): string[] {
   if (maxBytes <= 0) return [input];
   const chunks: string[] = [];
@@ -2388,9 +2403,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   const runtimeOwnerIds = Array.from(
     new Set(
-      [currentMeta.nodeId, currentMeta.discountId, configOwnerId]
-        .map((value) => String(value ?? "").trim())
-        .filter(Boolean),
+      [currentMeta.nodeId, currentMeta.discountId, configOwnerId].flatMap((value) =>
+        deriveRuntimeOwnerIdAliases(value),
+      ),
     ),
   );
   console.info("[discount-save] runtime-owner-targets", {

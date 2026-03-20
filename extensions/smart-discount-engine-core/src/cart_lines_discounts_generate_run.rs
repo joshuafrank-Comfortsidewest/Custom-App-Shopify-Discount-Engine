@@ -268,10 +268,14 @@ fn cart_lines_discounts_generate_run(
 ) -> Result<schema::CartLinesDiscountsGenerateRunResult> {
     let discount = input.discount();
     let shop = input.shop();
-    let shop_runtime_config_metafield_json = shop
-        .runtime_config_metafield()
+    let shop_runtime_app_config_metafield_json = shop
+        .runtime_config_app_metafield()
         .map(|metafield| metafield.value())
-        .map(|value| value.as_str());
+        .map(|value| value.to_string());
+    let shop_runtime_legacy_config_metafield_json = shop
+        .runtime_config_legacy_metafield()
+        .map(|metafield| metafield.value())
+        .map(|value| value.to_string());
     let app_function_config_metafield_json = discount
         .app_function_config_metafield()
         .map(|metafield| metafield.value())
@@ -289,14 +293,15 @@ fn cart_lines_discounts_generate_run(
             .app_function_config_part_3_metafield()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
-        discount
-            .app_function_config_part_4_metafield()
-            .map(|metafield| metafield.value())
-            .map(|value| value.as_str()),
     ];
-    let discount_metafield_json = shop_runtime_config_metafield_json
-        .map(|value| value.to_string())
-        .or_else(|| resolve_runtime_config_json(app_function_config_metafield_json, &app_function_config_chunk_values));
+    let discount_metafield_json = shop_runtime_app_config_metafield_json
+        .or(shop_runtime_legacy_config_metafield_json)
+        .or_else(|| {
+            resolve_runtime_config_json(
+                app_function_config_metafield_json,
+                &app_function_config_chunk_values,
+            )
+        });
     let config = parse_runtime_config(discount_metafield_json.as_deref()).unwrap_or_default();
 
     let entered_codes: Vec<String> = input
