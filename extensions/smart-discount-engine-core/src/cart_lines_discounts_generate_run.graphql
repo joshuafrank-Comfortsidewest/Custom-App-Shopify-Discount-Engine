@@ -166,33 +166,4 @@ query Input {
       value
     }
   }
-  shop {
-    shopRuntimeConfigMetafield: metafield(namespace: "smart_discount_engine", key: "config") {
-      value
-    }
-    shopRuntimeConfigPart1Metafield: metafield(
-      namespace: "smart_discount_engine"
-      key: "config-part-1"
-    ) {
-      value
-    }
-    shopRuntimeConfigPart2Metafield: metafield(
-      namespace: "smart_discount_engine"
-      key: "config-part-2"
-    ) {
-      value
-    }
-    shopRuntimeConfigPart3Metafield: metafield(
-      namespace: "smart_discount_engine"
-      key: "config-part-3"
-    ) {
-      value
-    }
-    shopRuntimeConfigPart4Metafield: metafield(
-      namespace: "smart_discount_engine"
-      key: "config-part-4"
-    ) {
-      value
-    }
-  }
 }

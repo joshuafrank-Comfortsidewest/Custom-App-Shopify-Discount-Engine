@@ -289,38 +289,10 @@ fn cart_lines_discounts_generate_run(
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
     ];
-    let discount_runtime_config_json = resolve_runtime_config_json(
+    let runtime_config_json = resolve_runtime_config_json(
         runtime_config_metafield_json.as_deref(),
         &runtime_config_chunk_values,
     );
-    let shop = input.shop();
-    let shop_runtime_config_metafield_json = shop
-        .shop_runtime_config_metafield()
-        .map(|metafield| metafield.value())
-        .map(|value| value.to_string());
-    let shop_runtime_config_chunk_values = [
-        shop
-            .shop_runtime_config_part_1_metafield()
-            .map(|metafield| metafield.value())
-            .map(|value| value.as_str()),
-        shop
-            .shop_runtime_config_part_2_metafield()
-            .map(|metafield| metafield.value())
-            .map(|value| value.as_str()),
-        shop
-            .shop_runtime_config_part_3_metafield()
-            .map(|metafield| metafield.value())
-            .map(|value| value.as_str()),
-        shop
-            .shop_runtime_config_part_4_metafield()
-            .map(|metafield| metafield.value())
-            .map(|value| value.as_str()),
-    ];
-    let shop_runtime_config_json = resolve_runtime_config_json(
-        shop_runtime_config_metafield_json.as_deref(),
-        &shop_runtime_config_chunk_values,
-    );
-    let runtime_config_json = discount_runtime_config_json.or(shop_runtime_config_json);
     let config = parse_runtime_config(runtime_config_json.as_deref()).unwrap_or_default();
 
     let entered_codes: Vec<String> = input
@@ -1000,8 +972,19 @@ fn parse_runtime_config(raw_json: Option<&str>) -> Option<RuntimeConfig> {
 }
 
 fn resolve_runtime_config_json(primary: Option<&str>, chunks: &[Option<&str>]) -> Option<String> {
+    let decode_json_string = |raw: &str| -> String {
+        serde_json::from_str::<String>(raw).unwrap_or_else(|_| raw.to_string())
+    };
+    let decode_manifest = |raw: &str| -> Option<RuntimeConfigChunkManifest> {
+        serde_json::from_str::<RuntimeConfigChunkManifest>(raw).ok().or_else(|| {
+            serde_json::from_str::<String>(raw)
+                .ok()
+                .and_then(|decoded| serde_json::from_str::<RuntimeConfigChunkManifest>(&decoded).ok())
+        })
+    };
+
     if let Some(raw) = primary {
-        if let Ok(manifest) = serde_json::from_str::<RuntimeConfigChunkManifest>(raw) {
+        if let Some(manifest) = decode_manifest(raw) {
             if manifest.chunked {
                 if manifest.parts == 0 || manifest.parts > chunks.len() {
                     return None;
@@ -1011,23 +994,26 @@ fn resolve_runtime_config_json(primary: Option<&str>, chunks: &[Option<&str>]) -
                     let Some(part) = chunks[idx] else {
                         return None;
                     };
-                    if part.is_empty() {
+                    let decoded_part = decode_json_string(part);
+                    if decoded_part.is_empty() {
                         return None;
                     }
-                    joined.push_str(part);
+                    joined.push_str(&decoded_part);
                 }
                 return Some(joined);
             }
         }
-        if !raw.is_empty() {
-            return Some(raw.to_string());
+        let decoded_primary = decode_json_string(raw);
+        if !decoded_primary.is_empty() {
+            return Some(decoded_primary);
         }
     }
 
     let mut fallback = String::new();
     for part in chunks.iter().flatten() {
-        if !part.is_empty() {
-            fallback.push_str(part);
+        let decoded_part = decode_json_string(part);
+        if !decoded_part.is_empty() {
+            fallback.push_str(&decoded_part);
         }
     }
     if fallback.is_empty() {
