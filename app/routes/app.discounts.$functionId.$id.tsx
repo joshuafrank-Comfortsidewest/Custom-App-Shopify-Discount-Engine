@@ -21,6 +21,7 @@ import {
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
+import prisma from "../db.server";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -38,17 +39,29 @@ type ItemCollectionRule = {
   product_ids: string[];
 };
 
+type HvacCombinationRule = {
+  name: string;
+  enabled: boolean;
+  outdoor_source_sku: string;
+  outdoor_product_ids: string[];
+  indoor_product_ids: string[];
+  allowed_indoor_skus: string[];
+  min_indoor_per_outdoor: number;
+  max_indoor_per_outdoor: number;
+  percent_off_hvac_products: number;
+  amount_off_outdoor_per_bundle: number;
+  stack_mode: "independent" | "shared";
+};
+
 type HvacRule = {
   enabled: boolean;
-  indoor_collection_id: string;
-  outdoor_collection_id: string;
   min_indoor_per_outdoor: number;
   max_indoor_per_outdoor: number;
   percent_off_hvac_products: number;
   amount_off_outdoor_per_bundle: number;
   indoor_product_ids: string[];
   outdoor_product_ids: string[];
-  combination_rules: any[];
+  combination_rules: HvacCombinationRule[];
 };
 
 type SpendActivation = {
@@ -63,11 +76,25 @@ type SpendActivation = {
 type CollectionSpendRule = {
   enabled: boolean;
   collection_id: string;
-  percent_off_per_step: number;
+  amount_off_per_step: number;
   min_collection_qty: number;
   spend_step_amount: number;
+  max_discounted_units_per_order: number;
   product_ids: string[];
   activation: SpendActivation;
+};
+
+type HvacMappingEntry = {
+  id: number;
+  sourceSku: string;
+  sourceType: string | null;
+  sourceBrand: string | null;
+  sourceSeries: string | null;
+  sourceSystem: string | null;
+  sourceBtu: number | null;
+  mappedProductId: string | null;
+  mappedProductTitle: string | null;
+  matchStatus: string;
 };
 
 type RuntimeConfig = {
@@ -119,8 +146,6 @@ const DEFAULT_ACTIVATION: SpendActivation = {
 
 const DEFAULT_HVAC: HvacRule = {
   enabled: false,
-  indoor_collection_id: "",
-  outdoor_collection_id: "",
   min_indoor_per_outdoor: 2,
   max_indoor_per_outdoor: 6,
   percent_off_hvac_products: 0,
@@ -133,9 +158,10 @@ const DEFAULT_HVAC: HvacRule = {
 const DEFAULT_SPEND: CollectionSpendRule = {
   enabled: false,
   collection_id: "",
-  percent_off_per_step: 2,
+  amount_off_per_step: 100,
   min_collection_qty: 1,
-  spend_step_amount: 100,
+  spend_step_amount: 1500,
+  max_discounted_units_per_order: 0,
   product_ids: [],
   activation: DEFAULT_ACTIVATION,
 };
@@ -265,6 +291,11 @@ function parseShopConfig(primary: string | null, parts: Array<string | null>): R
       collection_spend_rule: {
         ...DEFAULT_SPEND,
         ...(parsed.collection_spend_rule ?? {}),
+        // Support legacy field name migration
+        amount_off_per_step:
+          parsed.collection_spend_rule?.amount_off_per_step ??
+          parsed.collection_spend_rule?.percent_off_per_step ??
+          DEFAULT_SPEND.amount_off_per_step,
         activation: {
           ...DEFAULT_ACTIVATION,
           ...(parsed.collection_spend_rule?.activation ?? {}),
@@ -308,9 +339,10 @@ function chunkConfig(config: RuntimeConfig): { manifest: string; parts: string[]
 // ── Loader ─────────────────────────────────────────────────────────────────────
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
+  const shop = session.shop;
 
-  const [collections, configRes] = await Promise.all([
+  const [collections, configRes, hvacMappings] = await Promise.all([
     fetchCollections(admin),
     admin.graphql(`
       #graphql
@@ -326,27 +358,63 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         }
       }
     `),
+    prisma.hvacSkuMapping.findMany({
+      where: { shop, matchStatus: { in: ["auto_exact", "manual"] } },
+      orderBy: [{ sourceType: "asc" }, { sourceBrand: "asc" }, { sourceSku: "asc" }],
+    }),
   ]);
 
   const configData = await configRes.json();
-  const shop = configData?.data?.shop;
+  const shopData = configData?.data?.shop;
 
-  const config = parseShopConfig(shop?.runtimeConfig?.value ?? null, [
-    shop?.part1?.value ?? null,
-    shop?.part2?.value ?? null,
-    shop?.part3?.value ?? null,
-    shop?.part4?.value ?? null,
-    shop?.part5?.value ?? null,
-    shop?.part6?.value ?? null,
+  const config = parseShopConfig(shopData?.runtimeConfig?.value ?? null, [
+    shopData?.part1?.value ?? null,
+    shopData?.part2?.value ?? null,
+    shopData?.part3?.value ?? null,
+    shopData?.part4?.value ?? null,
+    shopData?.part5?.value ?? null,
+    shopData?.part6?.value ?? null,
   ]);
 
-  return json({ config, collections });
+  // Separate indoor/outdoor mapped units
+  const indoorMappings = hvacMappings
+    .filter((m) => m.sourceType === "indoor" && m.mappedProductId)
+    .map((m) => ({
+      id: m.id,
+      sourceSku: m.sourceSku,
+      sourceType: m.sourceType,
+      sourceBrand: m.sourceBrand,
+      sourceSeries: m.sourceSeries,
+      sourceSystem: m.sourceSystem,
+      sourceBtu: m.sourceBtu,
+      mappedProductId: m.mappedProductId,
+      mappedProductTitle: m.mappedProductTitle,
+      matchStatus: m.matchStatus,
+    }));
+
+  const outdoorMappings = hvacMappings
+    .filter((m) => m.sourceType === "outdoor" && m.mappedProductId)
+    .map((m) => ({
+      id: m.id,
+      sourceSku: m.sourceSku,
+      sourceType: m.sourceType,
+      sourceBrand: m.sourceBrand,
+      sourceSeries: m.sourceSeries,
+      sourceSystem: m.sourceSystem,
+      sourceBtu: m.sourceBtu,
+      mappedProductId: m.mappedProductId,
+      mappedProductTitle: m.mappedProductTitle,
+      matchStatus: m.matchStatus,
+    }));
+
+  return json({ config, collections, indoorMappings, outdoorMappings });
 };
 
 // ── Action ─────────────────────────────────────────────────────────────────────
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { admin } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
+  const shop = session.shop;
   const fd = await request.formData();
 
   const configJson = String(fd.get("config_json") ?? "{}");
@@ -368,20 +436,57 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }),
   );
 
-  // Fetch product IDs for HVAC indoor/outdoor collections
+  // Pull HVAC product IDs from the mapping database (not collections)
   const hvacBase = parsed.hvac_rule ?? DEFAULT_HVAC;
-  const [indoorIds, outdoorIds] = await Promise.all([
-    fetchAllProductIds(admin, hvacBase.indoor_collection_id ?? ""),
-    fetchAllProductIds(admin, hvacBase.outdoor_collection_id ?? ""),
-  ]);
-  if (indoorIds.length > 0) productCounts.push({ label: "HVAC indoor", count: indoorIds.length });
-  if (outdoorIds.length > 0) productCounts.push({ label: "HVAC outdoor", count: outdoorIds.length });
+  const allHvacMappings = await prisma.hvacSkuMapping.findMany({
+    where: { shop, matchStatus: { in: ["auto_exact", "manual"] }, mappedProductId: { not: null } },
+  });
+
+  const indoorIds = [
+    ...new Set(
+      allHvacMappings
+        .filter((m) => m.sourceType === "indoor" && m.mappedProductId)
+        .map((m) => m.mappedProductId!),
+    ),
+  ];
+  const outdoorIds = [
+    ...new Set(
+      allHvacMappings
+        .filter((m) => m.sourceType === "outdoor" && m.mappedProductId)
+        .map((m) => m.mappedProductId!),
+    ),
+  ];
+
+  productCounts.push({ label: "HVAC indoor (from mapping)", count: indoorIds.length });
+  productCounts.push({ label: "HVAC outdoor (from mapping)", count: outdoorIds.length });
+
+  // Build a SKU → product ID lookup for combination rules
+  const skuToProductId = new Map<string, string>();
+  for (const m of allHvacMappings) {
+    if (m.mappedProductId) {
+      skuToProductId.set(m.sourceSku.toUpperCase(), m.mappedProductId);
+    }
+  }
+
+  // Resolve combination rules: convert SKUs to product IDs
+  const combination_rules = (hvacBase.combination_rules ?? []).map((rule) => {
+    const outdoorPid = rule.outdoor_source_sku
+      ? skuToProductId.get(rule.outdoor_source_sku.toUpperCase())
+      : undefined;
+    return {
+      ...rule,
+      outdoor_product_ids: outdoorPid ? [outdoorPid] : [] as string[],
+      indoor_product_ids: (rule.allowed_indoor_skus ?? [])
+        .map((sku: string) => skuToProductId.get(sku.toUpperCase()))
+        .filter((x): x is string => Boolean(x)),
+    };
+  });
 
   const hvac_rule: HvacRule = {
     ...hvacBase,
     indoor_product_ids: indoorIds,
     outdoor_product_ids: outdoorIds,
-    combination_rules: hvacBase.combination_rules ?? [],
+    combination_rules,
   };
 
   // Fetch product IDs for collection spend rule
@@ -477,8 +582,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 type Section = "order" | "item" | "hvac" | "spend" | "status";
 type RuleState = { collection_id: string; percent: string };
 
+type CombinationRuleState = {
+  name: string;
+  enabled: boolean;
+  outdoor_source_sku: string;
+  allowed_indoor_skus: string[];
+  min_indoor_per_outdoor: string;
+  max_indoor_per_outdoor: string;
+  percent_off_hvac_products: string;
+  amount_off_outdoor_per_bundle: string;
+  stack_mode: "independent" | "shared";
+};
+
 export default function DiscountConfigRoute() {
-  const { config, collections } = useLoaderData<typeof loader>();
+  const { config, collections, indoorMappings, outdoorMappings } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
 
   const formRef = useRef<HTMLFormElement>(null);
@@ -516,9 +633,7 @@ export default function DiscountConfigRoute() {
     })),
   );
 
-  // HVAC rules
-  const [hvacIndoor, setHvacIndoor] = useState(config.hvac_rule.indoor_collection_id ?? "");
-  const [hvacOutdoor, setHvacOutdoor] = useState(config.hvac_rule.outdoor_collection_id ?? "");
+  // HVAC rules (global defaults)
   const [hvacMinIndoor, setHvacMinIndoor] = useState(String(config.hvac_rule.min_indoor_per_outdoor));
   const [hvacMaxIndoor, setHvacMaxIndoor] = useState(String(config.hvac_rule.max_indoor_per_outdoor));
   const [hvacPercent, setHvacPercent] = useState(String(config.hvac_rule.percent_off_hvac_products));
@@ -526,16 +641,34 @@ export default function DiscountConfigRoute() {
     String(config.hvac_rule.amount_off_outdoor_per_bundle),
   );
 
+  // HVAC combination rules (per-condenser)
+  const [comboRules, setComboRules] = useState<CombinationRuleState[]>(
+    (config.hvac_rule.combination_rules ?? []).map((r: any) => ({
+      name: r.name ?? "",
+      enabled: r.enabled ?? true,
+      outdoor_source_sku: r.outdoor_source_sku ?? "",
+      allowed_indoor_skus: r.allowed_indoor_skus ?? [],
+      min_indoor_per_outdoor: String(r.min_indoor_per_outdoor ?? 2),
+      max_indoor_per_outdoor: String(r.max_indoor_per_outdoor ?? 6),
+      percent_off_hvac_products: String(r.percent_off_hvac_products ?? 0),
+      amount_off_outdoor_per_bundle: String(r.amount_off_outdoor_per_bundle ?? 0),
+      stack_mode: r.stack_mode ?? "independent",
+    })),
+  );
+
   // Collection spend rule
   const [spendCollection, setSpendCollection] = useState(config.collection_spend_rule.collection_id);
-  const [spendPctPerStep, setSpendPctPerStep] = useState(
-    String(config.collection_spend_rule.percent_off_per_step),
+  const [spendAmtPerStep, setSpendAmtPerStep] = useState(
+    String(config.collection_spend_rule.amount_off_per_step),
   );
   const [spendMinQty, setSpendMinQty] = useState(
     String(config.collection_spend_rule.min_collection_qty),
   );
   const [spendStepAmount, setSpendStepAmount] = useState(
     String(config.collection_spend_rule.spend_step_amount),
+  );
+  const [spendMaxUnits, setSpendMaxUnits] = useState(
+    String(config.collection_spend_rule.max_discounted_units_per_order ?? 0),
   );
 
   // Spend activation (X/Y/Z rule)
@@ -586,22 +719,33 @@ export default function DiscountConfigRoute() {
         .map((r) => ({ collection_id: r.collection_id, percent: Number(r.percent), product_ids: [] })),
       hvac_rule: {
         enabled: toggleHvac,
-        indoor_collection_id: hvacIndoor,
-        outdoor_collection_id: hvacOutdoor,
         min_indoor_per_outdoor: Number(hvacMinIndoor) || 2,
         max_indoor_per_outdoor: Number(hvacMaxIndoor) || 6,
         percent_off_hvac_products: Number(hvacPercent) || 0,
         amount_off_outdoor_per_bundle: Number(hvacAmountOff) || 0,
         indoor_product_ids: [],
         outdoor_product_ids: [],
-        combination_rules: config.hvac_rule.combination_rules ?? [],
+        combination_rules: comboRules.map((r) => ({
+          name: r.name,
+          enabled: r.enabled,
+          outdoor_source_sku: r.outdoor_source_sku,
+          allowed_indoor_skus: r.allowed_indoor_skus,
+          outdoor_product_ids: [],
+          indoor_product_ids: [],
+          min_indoor_per_outdoor: Number(r.min_indoor_per_outdoor) || 2,
+          max_indoor_per_outdoor: Number(r.max_indoor_per_outdoor) || 6,
+          percent_off_hvac_products: Number(r.percent_off_hvac_products) || 0,
+          amount_off_outdoor_per_bundle: Number(r.amount_off_outdoor_per_bundle) || 0,
+          stack_mode: r.stack_mode,
+        })),
       },
       collection_spend_rule: {
         enabled: toggleSpend,
         collection_id: spendCollection,
-        percent_off_per_step: Number(spendPctPerStep) || 0,
+        amount_off_per_step: Number(spendAmtPerStep) || 0,
         min_collection_qty: Number(spendMinQty) || 1,
         spend_step_amount: Number(spendStepAmount) || 0,
+        max_discounted_units_per_order: Number(spendMaxUnits) || 0,
         product_ids: [],
         activation: {
           mode: spendMode,
@@ -846,74 +990,305 @@ export default function DiscountConfigRoute() {
           {/* ── HVAC Rules ── */}
           {section === "hvac" && (
             <Layout.Section>
-              <Card>
-                <BlockStack gap="400">
-                  <Text as="h3" variant="headingSm">
-                    HVAC Bundle Rules
-                  </Text>
-                  <Text as="p" variant="bodyMd" tone="subdued">
-                    Customers who buy a qualifying ratio of indoor to outdoor units get a bundle
-                    discount. Product IDs are fetched from the selected collections on save.
-                  </Text>
-                  <Select
-                    label="Indoor Products Collection"
-                    options={collectionOptions}
-                    value={hvacIndoor}
-                    onChange={setHvacIndoor}
-                  />
-                  <Select
-                    label="Outdoor Products Collection"
-                    options={collectionOptions}
-                    value={hvacOutdoor}
-                    onChange={setHvacOutdoor}
-                  />
-                  <Divider />
-                  <FormLayout>
-                    <FormLayout.Group>
-                      <TextField
-                        label="Min indoor heads per outdoor unit"
-                        type="number"
-                        value={hvacMinIndoor}
-                        onChange={setHvacMinIndoor}
-                        helpText="e.g. 2 = customer needs at least 2 indoor units per outdoor unit"
-                        autoComplete="off"
-                      />
-                      <TextField
-                        label="Max indoor heads per outdoor unit"
-                        type="number"
-                        value={hvacMaxIndoor}
-                        onChange={setHvacMaxIndoor}
-                        helpText="Cap on how many indoor units receive the bundle discount"
-                        autoComplete="off"
-                      />
-                    </FormLayout.Group>
-                    <FormLayout.Group>
-                      <TextField
-                        label="% off all HVAC products in bundle"
-                        type="number"
-                        value={hvacPercent}
-                        onChange={setHvacPercent}
-                        helpText="Applied to both indoor and outdoor units in the qualifying bundle"
-                        autoComplete="off"
-                      />
-                      <TextField
-                        label="$ amount off per outdoor unit"
-                        type="number"
-                        value={hvacAmountOff}
-                        onChange={setHvacAmountOff}
-                        helpText="Fixed dollar discount applied to each qualifying outdoor unit"
-                        autoComplete="off"
-                      />
-                    </FormLayout.Group>
-                  </FormLayout>
-                  {config.hvac_rule.indoor_product_ids.length > 0 && (
-                    <Text as="p" variant="bodyMd" tone="subdued">
-                      Currently saved: {config.hvac_rule.indoor_product_ids.length} indoor /{" "}
-                      {config.hvac_rule.outdoor_product_ids.length} outdoor product IDs
+              <BlockStack gap="400">
+                <Card>
+                  <BlockStack gap="400">
+                    <Text as="h3" variant="headingSm">
+                      HVAC Bundle Rules
                     </Text>
-                  )}
-                </BlockStack>
-              </Card>
+                    <Text as="p" variant="bodyMd" tone="subdued">
+                      Product IDs come from the HVAC Mapping page (SKU-based matching, not collections).
+                      Go to HVAC Mapping to import your catalog and match SKUs to Shopify products first.
+                    </Text>
+                    <InlineStack gap="400">
+                      <Badge tone="info">{`${(indoorMappings as HvacMappingEntry[]).length} indoor mapped`}</Badge>
+                      <Badge tone="info">{`${(outdoorMappings as HvacMappingEntry[]).length} outdoor mapped`}</Badge>
+                    </InlineStack>
+                    <Divider />
+                    <Text as="h4" variant="headingSm">
+                      Global Defaults (apply when no combination rule matches)
+                    </Text>
+                    <FormLayout>
+                      <FormLayout.Group>
+                        <TextField
+                          label="Min indoor heads per outdoor unit"
+                          type="number"
+                          value={hvacMinIndoor}
+                          onChange={setHvacMinIndoor}
+                          autoComplete="off"
+                        />
+                        <TextField
+                          label="Max indoor heads per outdoor unit"
+                          type="number"
+                          value={hvacMaxIndoor}
+                          onChange={setHvacMaxIndoor}
+                          autoComplete="off"
+                        />
+                      </FormLayout.Group>
+                      <FormLayout.Group>
+                        <TextField
+                          label="% off HVAC products in bundle"
+                          type="number"
+                          value={hvacPercent}
+                          onChange={setHvacPercent}
+                          autoComplete="off"
+                        />
+                        <TextField
+                          label="$ off per outdoor unit"
+                          type="number"
+                          value={hvacAmountOff}
+                          onChange={setHvacAmountOff}
+                          autoComplete="off"
+                        />
+                      </FormLayout.Group>
+                    </FormLayout>
+                  </BlockStack>
+                </Card>
+
+                {/* Per-condenser combination rules */}
+                <Card>
+                  <BlockStack gap="400">
+                    <InlineStack align="space-between">
+                      <Text as="h3" variant="headingSm">
+                        Per-Condenser Combination Rules
+                      </Text>
+                      <Button
+                        onClick={() =>
+                          setComboRules((prev) => [
+                            ...prev,
+                            {
+                              name: `Rule ${prev.length + 1}`,
+                              enabled: true,
+                              outdoor_source_sku: "",
+                              allowed_indoor_skus: [],
+                              min_indoor_per_outdoor: "2",
+                              max_indoor_per_outdoor: "6",
+                              percent_off_hvac_products: String(hvacPercent),
+                              amount_off_outdoor_per_bundle: String(hvacAmountOff),
+                              stack_mode: "independent",
+                            },
+                          ])
+                        }
+                      >
+                        + Add Combination Rule
+                      </Button>
+                    </InlineStack>
+                    <Text as="p" variant="bodyMd" tone="subdued">
+                      Customize which indoor heads are allowed per outdoor condenser. Each rule defines
+                      a specific condenser and its permitted indoor units with custom discount settings.
+                    </Text>
+
+                    {comboRules.map((rule, idx) => (
+                      <Card key={`combo-${idx}`}>
+                        <BlockStack gap="300">
+                          <InlineStack align="space-between" blockAlign="center">
+                            <InlineStack gap="200" blockAlign="center">
+                              <Checkbox
+                                label=""
+                                checked={rule.enabled}
+                                onChange={(v) =>
+                                  setComboRules((p) =>
+                                    p.map((r, i) => (i === idx ? { ...r, enabled: v } : r)),
+                                  )
+                                }
+                              />
+                              <Text as="h4" variant="headingSm">
+                                {rule.name || `Rule ${idx + 1}`}
+                              </Text>
+                              {!rule.enabled && <Badge tone="attention">disabled</Badge>}
+                            </InlineStack>
+                            <Button
+                              variant="plain"
+                              tone="critical"
+                              onClick={() =>
+                                setComboRules((p) => p.filter((_, i) => i !== idx))
+                              }
+                            >
+                              Remove
+                            </Button>
+                          </InlineStack>
+
+                          <TextField
+                            label="Rule Name"
+                            value={rule.name}
+                            onChange={(v) =>
+                              setComboRules((p) =>
+                                p.map((r, i) => (i === idx ? { ...r, name: v } : r)),
+                              )
+                            }
+                            autoComplete="off"
+                          />
+
+                          <Select
+                            label="Outdoor Condenser (SKU)"
+                            options={[
+                              { label: "— Select condenser —", value: "" },
+                              ...(outdoorMappings as HvacMappingEntry[]).map((m) => ({
+                                label: `${m.sourceSku} — ${m.sourceBrand ?? ""} ${m.mappedProductTitle ?? ""}`,
+                                value: m.sourceSku,
+                              })),
+                            ]}
+                            value={rule.outdoor_source_sku}
+                            onChange={(v) =>
+                              setComboRules((p) =>
+                                p.map((r, i) =>
+                                  i === idx ? { ...r, outdoor_source_sku: v } : r,
+                                ),
+                              )
+                            }
+                          />
+
+                          <Text as="p" variant="bodyMd">
+                            Allowed Indoor Heads ({rule.allowed_indoor_skus.length} selected)
+                          </Text>
+                          <div style={{ maxHeight: 200, overflowY: "auto", border: "1px solid #ddd", borderRadius: 4, padding: 8 }}>
+                            <BlockStack gap="100">
+                              <InlineStack gap="200">
+                                <Button
+                                  variant="plain"
+                                  onClick={() =>
+                                    setComboRules((p) =>
+                                      p.map((r, i) =>
+                                        i === idx
+                                          ? {
+                                              ...r,
+                                              allowed_indoor_skus: (indoorMappings as HvacMappingEntry[]).map(
+                                                (m) => m.sourceSku,
+                                              ),
+                                            }
+                                          : r,
+                                      ),
+                                    )
+                                  }
+                                >
+                                  Select All
+                                </Button>
+                                <Button
+                                  variant="plain"
+                                  onClick={() =>
+                                    setComboRules((p) =>
+                                      p.map((r, i) =>
+                                        i === idx ? { ...r, allowed_indoor_skus: [] } : r,
+                                      ),
+                                    )
+                                  }
+                                >
+                                  Clear All
+                                </Button>
+                              </InlineStack>
+                              {(indoorMappings as HvacMappingEntry[]).map((m) => (
+                                <Checkbox
+                                  key={m.sourceSku}
+                                  label={`${m.sourceSku} — ${m.sourceBrand ?? ""} ${m.sourceSystem ?? ""} ${m.sourceBtu ? m.sourceBtu + " BTU" : ""}`}
+                                  checked={rule.allowed_indoor_skus.includes(m.sourceSku)}
+                                  onChange={(checked) =>
+                                    setComboRules((p) =>
+                                      p.map((r, i) => {
+                                        if (i !== idx) return r;
+                                        const skus = checked
+                                          ? [...r.allowed_indoor_skus, m.sourceSku]
+                                          : r.allowed_indoor_skus.filter((s) => s !== m.sourceSku);
+                                        return { ...r, allowed_indoor_skus: skus };
+                                      }),
+                                    )
+                                  }
+                                />
+                              ))}
+                            </BlockStack>
+                          </div>
+
+                          <FormLayout>
+                            <FormLayout.Group>
+                              <TextField
+                                label="Min indoor"
+                                type="number"
+                                value={rule.min_indoor_per_outdoor}
+                                onChange={(v) =>
+                                  setComboRules((p) =>
+                                    p.map((r, i) =>
+                                      i === idx ? { ...r, min_indoor_per_outdoor: v } : r,
+                                    ),
+                                  )
+                                }
+                                autoComplete="off"
+                              />
+                              <TextField
+                                label="Max indoor"
+                                type="number"
+                                value={rule.max_indoor_per_outdoor}
+                                onChange={(v) =>
+                                  setComboRules((p) =>
+                                    p.map((r, i) =>
+                                      i === idx ? { ...r, max_indoor_per_outdoor: v } : r,
+                                    ),
+                                  )
+                                }
+                                autoComplete="off"
+                              />
+                            </FormLayout.Group>
+                            <FormLayout.Group>
+                              <TextField
+                                label="% off"
+                                type="number"
+                                value={rule.percent_off_hvac_products}
+                                onChange={(v) =>
+                                  setComboRules((p) =>
+                                    p.map((r, i) =>
+                                      i === idx
+                                        ? { ...r, percent_off_hvac_products: v }
+                                        : r,
+                                    ),
+                                  )
+                                }
+                                autoComplete="off"
+                              />
+                              <TextField
+                                label="$ off per outdoor"
+                                type="number"
+                                value={rule.amount_off_outdoor_per_bundle}
+                                onChange={(v) =>
+                                  setComboRules((p) =>
+                                    p.map((r, i) =>
+                                      i === idx
+                                        ? { ...r, amount_off_outdoor_per_bundle: v }
+                                        : r,
+                                    ),
+                                  )
+                                }
+                                autoComplete="off"
+                              />
+                            </FormLayout.Group>
+                            <Select
+                              label="Stack Mode"
+                              options={[
+                                { label: "Independent (each condenser is separate)", value: "independent" },
+                                { label: "Shared (all condensers share indoor pool)", value: "shared" },
+                              ]}
+                              value={rule.stack_mode}
+                              onChange={(v) =>
+                                setComboRules((p) =>
+                                  p.map((r, i) =>
+                                    i === idx
+                                      ? { ...r, stack_mode: v as "independent" | "shared" }
+                                      : r,
+                                  ),
+                                )
+                              }
+                            />
+                          </FormLayout>
+                        </BlockStack>
+                      </Card>
+                    ))}
+
+                    {comboRules.length === 0 && (
+                      <Text as="p" variant="bodyMd" tone="subdued">
+                        No combination rules yet. All mapped indoor/outdoor products will use the
+                        global defaults above.
+                      </Text>
+                    )}
+                  </BlockStack>
+                </Card>
+              </BlockStack>
             </Layout.Section>
           )}
 
@@ -928,7 +1303,7 @@ export default function DiscountConfigRoute() {
                     </Text>
                     <Text as="p" variant="bodyMd" tone="subdued">
                       Customers earn a stepped discount by spending on products from this collection.
-                      Each spend step grants an additional % off. Product IDs are fetched on save.
+                      Each spend step grants a fixed dollar amount off. Product IDs are fetched on save.
                     </Text>
                     <Select
                       label="Collection"
@@ -939,10 +1314,11 @@ export default function DiscountConfigRoute() {
                     <FormLayout>
                       <FormLayout.Group>
                         <TextField
-                          label="% off per spend step"
+                          label="$ off per spend step"
                           type="number"
-                          value={spendPctPerStep}
-                          onChange={setSpendPctPerStep}
+                          value={spendAmtPerStep}
+                          onChange={setSpendAmtPerStep}
+                          helpText="Fixed dollar amount off per step (e.g. $100 off per $1500 spent)"
                           autoComplete="off"
                         />
                         <TextField
@@ -950,17 +1326,26 @@ export default function DiscountConfigRoute() {
                           type="number"
                           value={spendStepAmount}
                           onChange={setSpendStepAmount}
-                          helpText="e.g. 100 = gain 1 step per $100 spent on collection products"
+                          helpText="e.g. 1500 = gain 1 step per $1,500 spent on collection products"
                           autoComplete="off"
                         />
                       </FormLayout.Group>
-                      <TextField
-                        label="Min collection item qty to activate"
-                        type="number"
-                        value={spendMinQty}
-                        onChange={setSpendMinQty}
-                        autoComplete="off"
-                      />
+                      <FormLayout.Group>
+                        <TextField
+                          label="Min collection item qty to activate"
+                          type="number"
+                          value={spendMinQty}
+                          onChange={setSpendMinQty}
+                          autoComplete="off"
+                        />
+                        <TextField
+                          label="Max discounted units per order (0 = unlimited)"
+                          type="number"
+                          value={spendMaxUnits}
+                          onChange={setSpendMaxUnits}
+                          autoComplete="off"
+                        />
+                      </FormLayout.Group>
                     </FormLayout>
                   </BlockStack>
                 </Card>
@@ -1052,7 +1437,7 @@ export default function DiscountConfigRoute() {
                     <List.Item>
                       Item rules: {config.item_collection_rules.length} —{" "}
                       <Badge tone={totalItemProducts > 0 ? "success" : "attention"}>
-                        {String(totalItemProducts)} product IDs
+                        {`${totalItemProducts} product IDs`}
                       </Badge>
                     </List.Item>
                     <List.Item>
@@ -1062,15 +1447,21 @@ export default function DiscountConfigRoute() {
                       </Badge>
                       {" — "}
                       {config.hvac_rule.indoor_product_ids.length} indoor /{" "}
-                      {config.hvac_rule.outdoor_product_ids.length} outdoor
+                      {config.hvac_rule.outdoor_product_ids.length} outdoor /{" "}
+                      {config.hvac_rule.combination_rules?.length ?? 0} combination rules
+                    </List.Item>
+                    <List.Item>
+                      HVAC Mapping:{" "}
+                      <Badge tone="info">{`${(indoorMappings as HvacMappingEntry[]).length} indoor mapped`}</Badge>{" "}
+                      <Badge tone="info">{`${(outdoorMappings as HvacMappingEntry[]).length} outdoor mapped`}</Badge>
                     </List.Item>
                     <List.Item>
                       Collection spend:{" "}
                       <Badge tone={config.toggles.collection_spend_enabled ? "success" : "attention"}>
                         {config.toggles.collection_spend_enabled ? "Enabled" : "Disabled"}
                       </Badge>
-                      {" — mode: "}
-                      {config.collection_spend_rule.activation.mode}
+                      {" — $"}
+                      {config.collection_spend_rule.amount_off_per_step} off per ${config.collection_spend_rule.spend_step_amount} spent
                       {" — "}
                       {config.collection_spend_rule.product_ids.length} product IDs
                     </List.Item>

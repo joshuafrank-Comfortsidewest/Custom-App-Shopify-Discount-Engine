@@ -28,7 +28,11 @@ export default function AppHome() {
                 <Link url="/app/discounts" removeUnderline>
                   Discounts
                 </Link>{" "}
-                page to build and validate the new rules engine.
+                page to configure discount rules, or go to{" "}
+                <Link url="/app/hvac-mapping" removeUnderline>
+                  HVAC Mapping
+                </Link>{" "}
+                to manage SKU-to-product mappings and auto-tagging.
               </Text>
             </BlockStack>
           </Card>

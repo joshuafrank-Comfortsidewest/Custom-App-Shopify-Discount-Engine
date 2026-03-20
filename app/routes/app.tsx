@@ -25,6 +25,8 @@ export default function App() {
           Home
         </Link>
         <Link to="/app/discounts">Discounts</Link>
+        <Link to="/app/hvac-mapping">HVAC Mapping</Link>
+        <Link to="/app/auto-tagging">Auto-Tagging</Link>
       </NavMenu>
       <Outlet />
     </AppProvider>
