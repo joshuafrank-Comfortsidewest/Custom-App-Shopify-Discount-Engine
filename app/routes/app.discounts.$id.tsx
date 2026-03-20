@@ -2396,6 +2396,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   console.info("[discount-save] runtime-owner-targets", {
     shop: session.shop,
     discountNodeId: configOwnerId,
+    discountType: currentMeta.discountType,
+    discountObjectIdOrDiscountId: currentMeta.discountId,
     runtimeOwnerIds,
   });
   const json = await persistConfig(admin, configOwnerId, config, {
