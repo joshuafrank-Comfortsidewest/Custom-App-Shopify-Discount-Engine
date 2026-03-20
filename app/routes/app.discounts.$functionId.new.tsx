@@ -89,6 +89,7 @@ async function tryCreateDiscount(admin: any, functionId: string) {
         automaticAppDiscount: {
           title: `Smart Discount ${Date.now()}`,
           functionId,
+          discountClasses: ["PRODUCT", "SHIPPING"],
           startsAt: new Date().toISOString(),
           combinesWith: {
             orderDiscounts: true,

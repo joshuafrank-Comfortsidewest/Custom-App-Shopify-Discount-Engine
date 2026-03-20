@@ -108,6 +108,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           automaticAppDiscount: {
             title: `Smart Discount ${Date.now()}`,
             functionId,
+            discountClasses: ["PRODUCT", "SHIPPING"],
             startsAt: new Date().toISOString(),
             combinesWith: {
               orderDiscounts: true,
