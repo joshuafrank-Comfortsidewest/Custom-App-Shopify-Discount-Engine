@@ -204,6 +204,7 @@ fn cart_lines_discounts_generate_run(
         resolve_runtime_config_json(runtime_config_primary.as_deref(), &runtime_config_chunks);
     let config = parse_runtime_config(runtime_config_json.as_deref()).unwrap_or_default();
 
+    let (first_order_percent, vip_percent) = compute_customer_percents(&input, &config);
     let item_percents_by_product = build_product_item_percents(&config);
     let hvac_active_rules = active_hvac_rules(&input, &config);
 
@@ -232,7 +233,11 @@ fn cart_lines_discounts_generate_run(
             .copied()
             .unwrap_or(0.0);
         let bulk_percent = compute_bulk_percent(&config, line_qty);
-        let base_percent = item_percent.max(bulk_percent).max(0.0);
+        let base_percent = item_percent
+            .max(bulk_percent)
+            .max(first_order_percent)
+            .max(vip_percent)
+            .max(0.0);
 
         let mut hvac_fixed_stackable_qty: i32 = 0;
         let mut hvac_fixed_stackable_amount_total: f64 = 0.0;
@@ -639,6 +644,48 @@ fn build_product_item_percents(config: &RuntimeConfig) -> HashMap<String, f64> {
     }
 
     percents
+}
+
+fn compute_customer_percents(
+    input: &schema::cart_lines_discounts_generate_run::Input,
+    config: &RuntimeConfig,
+) -> (f64, f64) {
+    let Some(buyer_identity) = input.cart().buyer_identity() else {
+        return (0.0, 0.0);
+    };
+    let Some(customer) = buyer_identity.customer() else {
+        return (0.0, 0.0);
+    };
+
+    let first_order_percent = if config.toggles.first_order_enabled && *customer.number_of_orders() == 0 {
+        config.first_order_percent.max(0.0)
+    } else {
+        0.0
+    };
+
+    let vip_percent = if config.toggles.vip_enabled {
+        customer
+            .vip_tags()
+            .iter()
+            .filter(|tag_match| *tag_match.has_tag())
+            .filter_map(|tag_match| vip_percent_from_tag(tag_match.tag()))
+            .fold(0.0, f64::max)
+    } else {
+        0.0
+    };
+
+    (first_order_percent, vip_percent)
+}
+
+fn vip_percent_from_tag(tag: &str) -> Option<f64> {
+    let normalized = tag.trim().to_ascii_uppercase();
+    let suffix = normalized.strip_prefix("VIP")?;
+    let value = suffix.parse::<i32>().ok()?;
+    if (3..=25).contains(&value) {
+        Some(value as f64)
+    } else {
+        None
+    }
 }
 
 fn compute_bulk_percent(config: &RuntimeConfig, line_qty: i32) -> f64 {

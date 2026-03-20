@@ -1,5 +1,41 @@
 query Input {
   cart {
+    buyerIdentity {
+      customer {
+        id
+        numberOfOrders
+        vipTags: hasTags(
+          tags: [
+            "VIP3"
+            "VIP4"
+            "VIP5"
+            "VIP6"
+            "VIP7"
+            "VIP8"
+            "VIP9"
+            "VIP10"
+            "VIP11"
+            "VIP12"
+            "VIP13"
+            "VIP14"
+            "VIP15"
+            "VIP16"
+            "VIP17"
+            "VIP18"
+            "VIP19"
+            "VIP20"
+            "VIP21"
+            "VIP22"
+            "VIP23"
+            "VIP24"
+            "VIP25"
+          ]
+        ) {
+          hasTag
+          tag
+        }
+      }
+    }
     lines {
       id
       quantity
