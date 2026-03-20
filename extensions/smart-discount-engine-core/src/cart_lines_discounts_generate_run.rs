@@ -267,11 +267,11 @@ fn cart_lines_discounts_generate_run(
     input: schema::cart_lines_discounts_generate_run::Input,
 ) -> Result<schema::CartLinesDiscountsGenerateRunResult> {
     let shop = input.shop();
-    let shop_runtime_config_metafield_json = shop
+    let runtime_config_metafield_json = shop
         .runtime_config_metafield()
         .map(|metafield| metafield.value())
         .map(|value| value.as_str());
-    let shop_runtime_config_chunk_values = [
+    let runtime_config_chunk_values = [
         shop.runtime_config_part_1_metafield()
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
@@ -285,22 +285,28 @@ fn cart_lines_discounts_generate_run(
             .map(|metafield| metafield.value())
             .map(|value| value.as_str()),
     ];
-    // Runtime config is sourced from the shop-level smart_discount_engine chunks.
     let metafield_json = resolve_runtime_config_json(
-        shop_runtime_config_metafield_json,
-        &shop_runtime_config_chunk_values,
+        runtime_config_metafield_json,
+        &runtime_config_chunk_values,
     );
-
+    let runtime_config_source = if metafield_json.is_some() {
+        "shop:smart_discount_engine/config"
+    } else {
+        "default:built-in"
+    };
     let config = runtime_config(metafield_json.as_deref());
-
-    let has_product_discount_class = input
-        .discount()
-        .discount_classes()
-        .contains(&schema::DiscountClass::Product);
+    let runtime_item_rule_product_count: usize = config
+        .item_collection_rules
+        .iter()
+        .map(|rule| rule.product_ids.len())
+        .sum();
+    let runtime_config_bytes = metafield_json.as_ref().map(|v| v.len()).unwrap_or(0);
     log!(
-        "[sde-runtime] has_product_discount_class={} item_rules={} hvac_rules={} other_products={}",
-        has_product_discount_class,
+        "[sde-runtime] source={} bytes={} item_rules={} item_rule_products={} hvac_rules={} other_products={}",
+        runtime_config_source,
+        runtime_config_bytes,
         config.item_collection_rules.len(),
+        runtime_item_rule_product_count,
         config.hvac_rule.combination_rules.len(),
         config.collection_spend_rule.product_ids.len()
     );
@@ -418,10 +424,13 @@ fn cart_lines_discounts_generate_run(
         .max(discount_percents.vip);
 
     let mut candidates: Vec<schema::ProductDiscountCandidate> = vec![];
+    let mut runtime_line_log_count: usize = 0;
 
     for line in input.cart().lines().iter() {
         let mut item_percent: f64 = 0.0;
         let line_qty: i32 = *line.quantity();
+        let mut normalized_pid = String::new();
+        let mut product_in_item_rule_map = false;
         let mut fixed_qty: i32 = 0;
         let mut hvac_fixed_stackable_qty: i32 = 0;
         let mut hvac_fixed_stackable_amount_total: f64 = 0.0;
@@ -439,9 +448,10 @@ fn cart_lines_discounts_generate_run(
         };
 
         if let Merchandise::ProductVariant(variant) = line.merchandise() {
-            let normalized_pid = normalize_product_id(variant.product().id());
+            normalized_pid = normalize_product_id(variant.product().id());
             if let Some(percent) = product_item_percents.get(&normalized_pid) {
                 item_percent = item_percent.max(*percent);
+                product_in_item_rule_map = true;
             }
             for rule in hvac_active_rules.iter() {
                 let rule_percent_qty = *rule.percent_target_qty_by_line.get(&line_id).unwrap_or(&0);
@@ -542,6 +552,8 @@ fn cart_lines_discounts_generate_run(
         let remaining_qty: i32 = (line_qty - fixed_qty - hvac_fixed_qty_total).max(0);
         let hvac_percent_qty = remaining_qty.min(hvac_percent_units_requested.max(0));
         let non_hvac_percent_qty = (remaining_qty - hvac_percent_qty).max(0);
+        let hvac_rule_matched =
+            hvac_percent_units_requested > 0 || hvac_fixed_qty_total > 0;
         let bundle_percent_contributed =
             hvac_percent_exclusive_best > (base_percent_candidate + 0.0001);
         let hvac_percent_attribution = if bundle_percent_contributed && base_percent_candidate > 0.0
@@ -552,6 +564,27 @@ fn cart_lines_discounts_generate_run(
         } else {
             current_promo_source.clone()
         };
+        if runtime_line_log_count < 40 {
+            let runtime_product_id = if normalized_pid.is_empty() {
+                "non-variant-line".to_string()
+            } else {
+                normalized_pid.clone()
+            };
+            log!(
+                "[sde-line] line={} product={} in_item_map={} item_percent={} base_percent={} hvac_matched={} hvac_percent_qty={} hvac_fixed_stackable_qty={} hvac_fixed_exclusive_qty={} other_fixed_qty={}",
+                line_id,
+                runtime_product_id,
+                product_in_item_rule_map,
+                fmt_percent(item_percent),
+                fmt_percent(base_percent_candidate),
+                hvac_rule_matched,
+                hvac_percent_qty,
+                hvac_fixed_stackable_qty,
+                hvac_fixed_exclusive_qty,
+                fixed_qty
+            );
+            runtime_line_log_count += 1;
+        }
 
         if fixed_qty > 0 && fixed_amount_per_item > 0.0 {
             candidates.push(schema::ProductDiscountCandidate {

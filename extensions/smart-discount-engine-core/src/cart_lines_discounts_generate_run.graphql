@@ -63,37 +63,34 @@ query Input {
   }
   shop {
     runtimeConfigMetafield: metafield(
-      namespace: "$app:smart_discount_engine"
+      namespace: "smart_discount_engine"
       key: "config"
     ) {
       value
     }
     runtimeConfigPart1Metafield: metafield(
-      namespace: "$app:smart_discount_engine"
+      namespace: "smart_discount_engine"
       key: "config-part-1"
     ) {
       value
     }
     runtimeConfigPart2Metafield: metafield(
-      namespace: "$app:smart_discount_engine"
+      namespace: "smart_discount_engine"
       key: "config-part-2"
     ) {
       value
     }
     runtimeConfigPart3Metafield: metafield(
-      namespace: "$app:smart_discount_engine"
+      namespace: "smart_discount_engine"
       key: "config-part-3"
     ) {
       value
     }
     runtimeConfigPart4Metafield: metafield(
-      namespace: "$app:smart_discount_engine"
+      namespace: "smart_discount_engine"
       key: "config-part-4"
     ) {
       value
     }
-  }
-  discount {
-    discountClasses
   }
 }
