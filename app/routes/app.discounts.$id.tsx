@@ -662,9 +662,9 @@ async function tagsRemove(admin: any, productId: string, tags: string[]): Promis
 
 const FUNCTION_CONFIG_MAX_BYTES = 10_000;
 const ADMIN_CONFIG_CHUNK_MAX_BYTES = 20_000;
-// Checkout function input query currently fetches up to 3 runtime chunk keys.
-// Keep runtime chunks large so oversized payloads still fit within those 3 parts.
-const RUNTIME_CONFIG_CHUNK_MAX_BYTES = 60_000;
+// Keep runtime chunk parts below conservative per-metafield read sizes so
+// checkout can reliably reconstruct large payloads from part-1..part-4.
+const RUNTIME_CONFIG_CHUNK_MAX_BYTES = 20_000;
 const FUNCTION_CONFIG_KEY = "function-configuration";
 const ADMIN_CONFIG_KEY = "admin-configuration";
 const FUNCTION_CONFIG_CHUNK_KEY_PREFIX = "function-configuration-part-";
@@ -2411,6 +2411,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   const runtimePreview = buildRuntimeFunctionConfig(config);
   const runtimePreviewBytes = Buffer.byteLength(JSON.stringify(runtimePreview), "utf8");
+  const runtimeChunkEstimate =
+    runtimePreviewBytes > FUNCTION_CONFIG_MAX_BYTES
+      ? Math.ceil(runtimePreviewBytes / RUNTIME_CONFIG_CHUNK_MAX_BYTES)
+      : 1;
   const probeProductIds = ["7914534076531", "7669624406131", "7992554750067", "7992580243571"];
   const probeInItemRules = probeProductIds.map((probeProductId) => ({
     productId: probeProductId,
@@ -2513,6 +2517,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     runtimeItemRuleDiagnostics: runtimeItemRuleDiagnostics.slice(0, 20),
     runtimeItemRule17Diagnostics,
     probeHvacPairMatches,
+    runtimeChunkEstimate,
     runtimePreviewBytes,
   });
 
