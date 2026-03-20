@@ -1,16 +1,15 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "02a6c9d83d75676201144c5bf5b2980c"
-name = "discount-engine"
+name = "Smart Discount Engine 2"
 application_url = "https://custom-app-shopify-discount-engine.onrender.com"
 embedded = true
 
 [build]
 automatically_update_urls_on_dev = true
-include_config_on_deploy = true
 
 [webhooks]
-api_version = "2026-04"
+api_version = "2026-01"
 
   [[webhooks.subscriptions]]
   topics = [ "app/scopes_update" ]
@@ -22,7 +21,9 @@ api_version = "2026-04"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_customers,read_products,write_discounts,write_products"
+scopes = "read_customers,write_discounts,read_products,write_products"
+optional_scopes = [ ]
+use_legacy_install_flow = false
 
 [auth]
 redirect_urls = [
@@ -33,3 +34,6 @@ redirect_urls = [
 url = "https://custom-app-shopify-discount-engine.onrender.com/proxy"
 subpath = "discount-progress"
 prefix = "apps"
+
+[app_preferences]
+url = "https://custom-app-shopify-discount-engine.onrender.com/app"
