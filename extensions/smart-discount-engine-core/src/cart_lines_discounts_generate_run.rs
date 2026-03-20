@@ -25,14 +25,22 @@ struct HvacActiveRule {
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 struct DiscountToggles {
+    first_order_enabled: bool,
+    bulk_enabled: bool,
+    vip_enabled: bool,
     item_collection_enabled: bool,
+    collection_spend_enabled: bool,
     hvac_enabled: bool,
 }
 
 impl Default for DiscountToggles {
     fn default() -> Self {
         Self {
+            first_order_enabled: true,
+            bulk_enabled: true,
+            vip_enabled: true,
             item_collection_enabled: true,
+            collection_spend_enabled: true,
             hvac_enabled: false,
         }
     }
@@ -116,6 +124,15 @@ impl Default for HvacRuleConfig {
 #[serde(default)]
 struct RuntimeConfig {
     toggles: DiscountToggles,
+    first_order_percent: f64,
+    bulk5_min: i32,
+    bulk10_min: i32,
+    bulk13_min: i32,
+    bulk15_min: i32,
+    bulk5_percent: f64,
+    bulk10_percent: f64,
+    bulk13_percent: f64,
+    bulk15_percent: f64,
     item_collection_rules: Vec<ItemCollectionRuleConfig>,
     hvac_rule: HvacRuleConfig,
 
@@ -130,6 +147,15 @@ impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
             toggles: DiscountToggles::default(),
+            first_order_percent: 0.0,
+            bulk5_min: 0,
+            bulk10_min: 0,
+            bulk13_min: 0,
+            bulk15_min: 0,
+            bulk5_percent: 0.0,
+            bulk10_percent: 0.0,
+            bulk13_percent: 0.0,
+            bulk15_percent: 0.0,
             item_collection_rules: vec![],
             hvac_rule: HvacRuleConfig::default(),
             item_collection_5_percent: 5.0,
@@ -201,11 +227,12 @@ fn cart_lines_discounts_generate_run(
         };
 
         let product_id = normalize_product_id(variant.product().id());
-        let base_percent = item_percents_by_product
+        let item_percent = item_percents_by_product
             .get(&product_id)
             .copied()
-            .unwrap_or(0.0)
-            .max(0.0);
+            .unwrap_or(0.0);
+        let bulk_percent = compute_bulk_percent(&config, line_qty);
+        let base_percent = item_percent.max(bulk_percent).max(0.0);
 
         let mut hvac_fixed_stackable_qty: i32 = 0;
         let mut hvac_fixed_stackable_amount_total: f64 = 0.0;
@@ -337,6 +364,11 @@ fn cart_lines_discounts_generate_run(
         }
 
         if base_percent_candidate > 0.0 && non_hvac_percent_qty > 0 {
+            let message = if bulk_percent > 0.0 && (bulk_percent - base_percent_candidate).abs() < 0.001 {
+                format!("Best {}% (Bulk discount)", fmt_percent(base_percent_candidate))
+            } else {
+                format!("Best {}% (Current promotion)", fmt_percent(base_percent_candidate))
+            };
             candidates.push(schema::ProductDiscountCandidate {
                 targets: vec![schema::ProductDiscountCandidateTarget::CartLine(
                     schema::CartLineTarget {
@@ -344,7 +376,7 @@ fn cart_lines_discounts_generate_run(
                         quantity: Some(non_hvac_percent_qty),
                     },
                 )],
-                message: Some(format!("Best {}% (Current promotion)", fmt_percent(base_percent_candidate))),
+                message: Some(message),
                 value: schema::ProductDiscountCandidateValue::Percentage(schema::Percentage {
                     value: Decimal(base_percent_candidate),
                 }),
@@ -607,6 +639,28 @@ fn build_product_item_percents(config: &RuntimeConfig) -> HashMap<String, f64> {
     }
 
     percents
+}
+
+fn compute_bulk_percent(config: &RuntimeConfig, line_qty: i32) -> f64 {
+    if !config.toggles.bulk_enabled || line_qty <= 0 {
+        return 0.0;
+    }
+
+    let tiers = [
+        (config.bulk5_min, config.bulk5_percent),
+        (config.bulk10_min, config.bulk10_percent),
+        (config.bulk13_min, config.bulk13_percent),
+        (config.bulk15_min, config.bulk15_percent),
+    ];
+
+    let mut best = 0.0;
+    for (min_qty, percent) in tiers {
+        if min_qty > 0 && line_qty >= min_qty && percent > best {
+            best = percent;
+        }
+    }
+
+    best.max(0.0)
 }
 
 fn parse_runtime_config(raw_json: Option<&str>) -> Option<RuntimeConfig> {
