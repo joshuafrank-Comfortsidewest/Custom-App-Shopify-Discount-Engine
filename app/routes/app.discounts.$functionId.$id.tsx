@@ -277,6 +277,26 @@ const condenserValidBtus = (() => {
   return map;
 })();
 
+// Build a lookup: indoor SKU (uppercase) → ALL possible BTU values.
+// Dip-switch units appear multiple times with the same SKU but different BTUs
+// (e.g. "6000", "9000", "12000", or comma-separated "6000, 9000, 12000").
+// All are captured here so compatibility checks any of them.
+const indoorSkuAllBtus = (() => {
+  const map = new Map<string, Set<number>>();
+  const indoorUnits = (unitsData as any).indoorMapping as any[];
+  for (const unit of indoorUnits ?? []) {
+    const sku = String(unit.SKU ?? "").trim().toUpperCase();
+    if (!sku) continue;
+    if (!map.has(sku)) map.set(sku, new Set());
+    const btus = map.get(sku)!;
+    for (const part of String(unit.BTU ?? "").split(",")) {
+      const n = parseInt(part.trim(), 10);
+      if (!isNaN(n) && n > 0) btus.add(n);
+    }
+  }
+  return map;
+})();
+
 function normalizeCompare(value: string | null | undefined): string {
   return String(value ?? "").trim().toUpperCase();
 }
@@ -298,16 +318,27 @@ function isIndoorCompatibleWithOutdoor(
   if (indoorBrand !== outdoorBrand || indoorRef !== outdoorRef) return false;
 
   // Check BTU compatibility via the combinations table.
-  // Look up all valid indoor zone BTU values for this specific condenser SKU.
   const outdoorSkuKey = normalizeCompare(outdoor.sourceSku);
   const validBtus = condenserValidBtus.get(outdoorSkuKey);
-  if (validBtus && validBtus.size > 0 && indoor.sourceBtu) {
-    // We have both the combinations data and the indoor BTU — do the proper check.
-    return validBtus.has(indoor.sourceBtu);
+  if (validBtus && validBtus.size > 0) {
+    // Get ALL possible BTUs for this indoor SKU from the JSON (handles dip-switch
+    // units that appear multiple times with different BTUs or comma-separated BTU strings).
+    const indoorSkuKey = normalizeCompare(indoor.sourceSku);
+    const allIndoorBtus = indoorSkuAllBtus.get(indoorSkuKey);
+
+    if (allIndoorBtus && allIndoorBtus.size > 0) {
+      // Compatible if ANY of the indoor unit's possible BTUs appear in the condenser's valid set.
+      for (const btu of allIndoorBtus) {
+        if (validBtus.has(btu)) return true;
+      }
+      return false;
+    }
+
+    // Fall back to DB-stored BTU if JSON lookup yields nothing.
+    if (indoor.sourceBtu) return validBtus.has(indoor.sourceBtu);
   }
 
-  // Fallback: no combinations data for this condenser, or indoor BTU not stored yet.
-  // Match on brand + refrigerant only so units still appear.
+  // Fallback: no combinations data for this condenser — match on brand + refrigerant only.
   return true;
 }
 
