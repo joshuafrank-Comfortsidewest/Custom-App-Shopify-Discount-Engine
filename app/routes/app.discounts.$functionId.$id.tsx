@@ -36,7 +36,6 @@ type RuleConditionState = "any" | "active" | "inactive";
 type ItemCollectionRule = {
   collection_id: string;
   percent: number;
-  product_ids: string[];
 };
 
 type HvacCombinationRule = {
@@ -132,10 +131,7 @@ type ActionResult = {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-// 25 KB per chunk – keeps each metafield value small enough for Shopify
-// Function input. Stale parts are cleared to "" on every save.
-const CHUNK_SIZE = 25_000;
-const MAX_PARTS = 6;
+const METAFIELD_BATCH_SIZE = 25; // Shopify metafieldsSet limit per call
 
 const DEFAULT_ACTIVATION: SpendActivation = {
   mode: "always",
@@ -239,79 +235,6 @@ async function fetchAllProductIds(admin: any, collectionId: string): Promise<str
   return ids;
 }
 
-function decodeJsonString(raw: string): string {
-  try {
-    const decoded = JSON.parse(raw);
-    return typeof decoded === "string" ? decoded : raw;
-  } catch {
-    return raw;
-  }
-}
-
-function parseShopConfig(primary: string | null, parts: Array<string | null>): RuntimeConfig {
-  let jsonRaw: string | null = null;
-
-  if (primary) {
-    const decoded = decodeJsonString(primary);
-    try {
-      const manifest = JSON.parse(decoded) as any;
-      if (manifest?.chunked && Number(manifest.parts) > 0) {
-        const count = Number(manifest.parts);
-        let joined = "";
-        let ok = true;
-        for (let i = 0; i < count; i++) {
-          const part = parts[i];
-          if (!part) { ok = false; break; }
-          joined += decodeJsonString(part);
-        }
-        if (ok) jsonRaw = joined;
-      } else {
-        jsonRaw = decoded;
-      }
-    } catch {
-      jsonRaw = decoded;
-    }
-  }
-
-  if (!jsonRaw) {
-    const fallback = parts.filter(Boolean).map((p) => decodeJsonString(p!)).join("");
-    jsonRaw = fallback || null;
-  }
-
-  if (!jsonRaw) return DEFAULT_CONFIG;
-
-  try {
-    const parsed = JSON.parse(jsonRaw) as any;
-    return {
-      ...DEFAULT_CONFIG,
-      ...parsed,
-      toggles: { ...DEFAULT_CONFIG.toggles, ...(parsed.toggles ?? {}) },
-      item_collection_rules: Array.isArray(parsed.item_collection_rules)
-        ? parsed.item_collection_rules
-        : [],
-      hvac_rule: { ...DEFAULT_HVAC, ...(parsed.hvac_rule ?? {}) },
-      collection_spend_rule: {
-        ...DEFAULT_SPEND,
-        ...(parsed.collection_spend_rule ?? {}),
-        // Support legacy field name migration
-        amount_off_per_step:
-          parsed.collection_spend_rule?.amount_off_per_step ??
-          parsed.collection_spend_rule?.percent_off_per_step ??
-          DEFAULT_SPEND.amount_off_per_step,
-        activation: {
-          ...DEFAULT_ACTIVATION,
-          ...(parsed.collection_spend_rule?.activation ?? {}),
-        },
-      },
-      return_blocked_codes: Array.isArray(parsed.return_blocked_codes)
-        ? parsed.return_blocked_codes
-        : DEFAULT_CONFIG.return_blocked_codes,
-    };
-  } catch {
-    return DEFAULT_CONFIG;
-  }
-}
-
 type HvacCompatMapping = {
   sourceSku: string;
   sourceBrand?: string | null;
@@ -339,32 +262,6 @@ function isIndoorCompatibleWithOutdoor(
   return indoorBrand === outdoorBrand && indoorRef === outdoorRef;
 }
 
-function chunkConfig(config: RuntimeConfig): { manifest: string; parts: string[] } {
-  const fullJson = JSON.stringify(config);
-  if (Buffer.byteLength(fullJson, "utf8") <= CHUNK_SIZE) {
-    return { manifest: fullJson, parts: [] };
-  }
-  const rawParts: string[] = [];
-  let offset = 0;
-  while (offset < fullJson.length) {
-    let end = offset + CHUNK_SIZE;
-    while (
-      end < fullJson.length &&
-      Buffer.byteLength(fullJson.slice(offset, end), "utf8") > CHUNK_SIZE
-    ) {
-      end -= 100;
-    }
-    rawParts.push(fullJson.slice(offset, end));
-    offset = end;
-  }
-  if (rawParts.length > MAX_PARTS) {
-    throw new Error(
-      `Config needs ${rawParts.length} chunks, max is ${MAX_PARTS}. Reduce collection sizes.`,
-    );
-  }
-  return { manifest: JSON.stringify({ chunked: true, parts: rawParts.length }), parts: rawParts };
-}
-
 // ── Loader ─────────────────────────────────────────────────────────────────────
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -378,12 +275,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       query ShopRuntimeConfig {
         shop {
           runtimeConfig: metafield(namespace: "smart_discount_engine", key: "config") { value }
-          part1: metafield(namespace: "smart_discount_engine", key: "config-part-1") { value }
-          part2: metafield(namespace: "smart_discount_engine", key: "config-part-2") { value }
-          part3: metafield(namespace: "smart_discount_engine", key: "config-part-3") { value }
-          part4: metafield(namespace: "smart_discount_engine", key: "config-part-4") { value }
-          part5: metafield(namespace: "smart_discount_engine", key: "config-part-5") { value }
-          part6: metafield(namespace: "smart_discount_engine", key: "config-part-6") { value }
         }
       }
     `),
@@ -415,15 +306,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const configData = await configRes.json();
   const shopData = configData?.data?.shop;
+  const rawConfigValue = shopData?.runtimeConfig?.value ?? null;
 
-  const config = parseShopConfig(shopData?.runtimeConfig?.value ?? null, [
-    shopData?.part1?.value ?? null,
-    shopData?.part2?.value ?? null,
-    shopData?.part3?.value ?? null,
-    shopData?.part4?.value ?? null,
-    shopData?.part5?.value ?? null,
-    shopData?.part6?.value ?? null,
-  ]);
+  let config: RuntimeConfig;
+  try {
+    config = rawConfigValue ? JSON.parse(rawConfigValue) : DEFAULT_CONFIG;
+  } catch {
+    config = DEFAULT_CONFIG;
+  }
 
   // Separate indoor/outdoor mapped units
   const indoorMappings = hvacMappings
@@ -471,26 +361,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       status: n.discount.status ?? "unknown",
     }));
 
-  // Raw metafield diagnostic: show what the Rust function would parse
-  const rawPrimary = shopData?.runtimeConfig?.value ?? null;
-  const rawParts = [
-    shopData?.part1?.value ?? null,
-    shopData?.part2?.value ?? null,
-    shopData?.part3?.value ?? null,
-    shopData?.part4?.value ?? null,
-    shopData?.part5?.value ?? null,
-    shopData?.part6?.value ?? null,
-  ];
-  const isChunked = (() => {
-    if (!rawPrimary) return false;
-    try {
-      const decoded = decodeJsonString(rawPrimary);
-      const manifest = JSON.parse(decoded);
-      return Boolean(manifest?.chunked);
-    } catch {
-      return false;
-    }
-  })();
   const configByteSize = (() => {
     try {
       return Buffer.byteLength(JSON.stringify(config), "utf8");
@@ -506,10 +376,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     outdoorMappings,
     diagnostics: {
       activeAppDiscounts,
-      hasMetafield: Boolean(rawPrimary),
-      isChunked,
+      hasMetafield: Boolean(rawConfigValue),
       configByteSize,
-      partsWithData: rawParts.filter(Boolean).length,
       keyValues: {
         first_order_enabled: config.toggles.first_order_enabled,
         first_order_percent: config.first_order_percent,
@@ -525,7 +393,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         vip_enabled: config.toggles.vip_enabled,
         item_collection_enabled: config.toggles.item_collection_enabled,
         item_rule_count: config.item_collection_rules.length,
-        item_rule_product_ids: config.item_collection_rules.reduce((s, r) => s + (r.product_ids?.length ?? 0), 0),
         hvac_enabled: config.toggles.hvac_enabled,
         hvac_indoor_ids: config.hvac_rule.indoor_product_ids.length,
         hvac_outdoor_ids: config.hvac_rule.outdoor_product_ids.length,
@@ -552,13 +419,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const productCounts: ActionResult["productCounts"] = [];
 
-  // Fetch product IDs for item collection rules
-  const item_collection_rules: ItemCollectionRule[] = await Promise.all(
+  // Fetch product IDs for item collection rules — used for product metafield writes,
+  // NOT stored in config (config only stores collection_id + percent).
+  const itemRulesWithProducts = await Promise.all(
     (parsed.item_collection_rules ?? []).map(async (rule) => {
       const product_ids = await fetchAllProductIds(admin, rule.collection_id);
       productCounts.push({ label: `Item rule (${rule.percent}%)`, count: product_ids.length });
       return { collection_id: rule.collection_id, percent: rule.percent, product_ids };
     }),
+  );
+  // Config only keeps collection_id + percent (no product_ids)
+  const item_collection_rules: ItemCollectionRule[] = itemRulesWithProducts.map(
+    ({ collection_id, percent }) => ({ collection_id, percent }),
   );
 
   // Pull HVAC product IDs from the mapping database (not collections)
@@ -662,59 +534,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     collection_spend_rule,
   };
 
-  let manifest: string;
-  let parts: string[];
-  try {
-    const chunked = chunkConfig(fullConfig);
-    manifest = chunked.manifest;
-    parts = chunked.parts;
-  } catch (err) {
-    return json<ActionResult>({
-      ok: false,
-      errors: [err instanceof Error ? err.message : "Failed to serialize config."],
-      productCounts,
-    });
-  }
+  const configJson = JSON.stringify(fullConfig);
+  const configSize = Buffer.byteLength(configJson, "utf8");
+  productCounts.push({ label: "Config size (bytes)", count: configSize });
 
-  // Get shop GID for shop-level metafields (what the Rust function reads)
+  // Get shop GID for shop-level metafields
   const shopRes = await admin.graphql(`
     #graphql
     query GetShopId {
       shop { id }
     }
   `);
-  const shopData = await shopRes.json();
-  const shopId = shopData?.data?.shop?.id as string | undefined;
+  const shopGql = await shopRes.json();
+  const shopId = shopGql?.data?.shop?.id as string | undefined;
 
   if (!shopId) {
     return json<ActionResult>({ ok: false, errors: ["Could not resolve shop ID."], productCounts });
   }
 
-  // Parts are stored as JSON-encoded strings (JSON.stringify wraps the fragment in quotes +
-  // escapes inner quotes). This makes each metafield value valid JSON, which Shopify requires
-  // for type "json". The Rust function's decode_json_string() unwraps them transparently.
-  const metafields: any[] = [
-    {
-      ownerId: shopId,
-      namespace: "smart_discount_engine",
-      key: "config",
-      type: "json",
-      value: manifest,
-    },
-  ];
-  // Always write ALL part metafields so old chunked data gets overwritten.
-  // Without this, stale parts can push the function's input over 128 KB,
-  // causing Shopify to null out every metafield.
-  for (let i = 0; i < MAX_PARTS; i++) {
-    metafields.push({
-      ownerId: shopId,
-      namespace: "smart_discount_engine",
-      key: `config-part-${i + 1}`,
-      type: "json",
-      value: i < parts.length ? JSON.stringify(parts[i]) : '""',
-    });
-  }
+  const errors: string[] = [];
 
+  // 1. Save config to single shop metafield (no chunking needed — config is ~12 KB)
   const saveRes = await admin.graphql(
     `
     #graphql
@@ -723,13 +563,69 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         userErrors { field message }
       }
     }`,
-    { variables: { metafields } },
+    {
+      variables: {
+        metafields: [
+          {
+            ownerId: shopId,
+            namespace: "smart_discount_engine",
+            key: "config",
+            type: "json",
+            value: configJson,
+          },
+        ],
+      },
+    },
   );
-
   const saveData = await saveRes.json();
-  const errors: string[] = (saveData?.data?.metafieldsSet?.userErrors ?? []).map(
-    (e: any) => String(e?.message ?? "Unknown error"),
-  );
+  for (const e of saveData?.data?.metafieldsSet?.userErrors ?? []) {
+    errors.push(String(e?.message ?? "Unknown error"));
+  }
+
+  // 2. Batch-set discount_percent metafield on each product in item rules.
+  //    The Shopify Function reads this metafield directly from cart line products.
+  const productPercentMap = new Map<string, number>();
+  for (const rule of itemRulesWithProducts) {
+    for (const pid of rule.product_ids) {
+      const existing = productPercentMap.get(pid) ?? 0;
+      productPercentMap.set(pid, Math.max(existing, rule.percent));
+    }
+  }
+
+  const productEntries = Array.from(productPercentMap.entries());
+  let metafieldWriteCount = 0;
+  for (let i = 0; i < productEntries.length; i += METAFIELD_BATCH_SIZE) {
+    const batch = productEntries.slice(i, i + METAFIELD_BATCH_SIZE);
+    const metafields = batch.map(([pid, pct]) => ({
+      ownerId: `gid://shopify/Product/${pid}`,
+      namespace: "smart_discount_engine",
+      key: "discount_percent",
+      type: "number_decimal",
+      value: String(pct),
+    }));
+
+    try {
+      const batchRes = await admin.graphql(
+        `
+        #graphql
+        mutation SetProductDiscountPercent($metafields: [MetafieldsSetInput!]!) {
+          metafieldsSet(metafields: $metafields) {
+            userErrors { field message }
+          }
+        }`,
+        { variables: { metafields } },
+      );
+      const batchData = await batchRes.json();
+      for (const e of batchData?.data?.metafieldsSet?.userErrors ?? []) {
+        errors.push(`Product metafield: ${e?.message ?? "Unknown error"}`);
+      }
+      metafieldWriteCount += batch.length;
+    } catch (err) {
+      errors.push(`Product metafield batch error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  productCounts.push({ label: "Product metafields written", count: metafieldWriteCount });
 
   return json<ActionResult>({ ok: errors.length === 0, errors, productCounts });
 };
@@ -863,11 +759,6 @@ export default function DiscountConfigRoute() {
     ...collections.map((c: CollectionOption) => ({ label: c.title, value: c.id })),
   ];
 
-  const totalItemProducts = config.item_collection_rules.reduce(
-    (s, r) => s + (r.product_ids?.length ?? 0),
-    0,
-  );
-
   const handleSubmit = (_e: React.FormEvent<HTMLFormElement>) => {
     if (!configInputRef.current) return;
     const built: RuntimeConfig = {
@@ -890,7 +781,7 @@ export default function DiscountConfigRoute() {
       bulk15_percent: Number(bulk15Pct) || 0,
       item_collection_rules: rules
         .filter((r) => r.collection_id && Number(r.percent) > 0)
-        .map((r) => ({ collection_id: r.collection_id, percent: Number(r.percent), product_ids: [] })),
+        .map((r) => ({ collection_id: r.collection_id, percent: Number(r.percent) })),
       hvac_rule: {
         enabled: toggleHvac,
         min_indoor_per_outdoor: Number(hvacMinIndoor) || 2,
@@ -1111,8 +1002,8 @@ export default function DiscountConfigRoute() {
                     Item Collection Rules
                   </Text>
                   <Text as="p" variant="bodyMd" tone="subdued">
-                    Products in the selected collection get the specified discount %. Product IDs are
-                    fetched on save — handles 2500+ products via chunked shop metafields.
+                    Products in the selected collection get the specified discount %. On save, a
+                    discount_percent metafield is set on each product for the checkout function to read.
                   </Text>
                   {rules.map((rule, i) => (
                     <Card key={`rule-${i}`}>
@@ -1673,9 +1564,8 @@ export default function DiscountConfigRoute() {
                           {diagnostics.hasMetafield ? "Yes" : "No"}
                         </Badge>
                       </List.Item>
-                      <List.Item>Chunked: {diagnostics.isChunked ? "Yes" : "No"}</List.Item>
-                      <List.Item>Parts with data: {diagnostics.partsWithData}</List.Item>
                       <List.Item>Config size: {diagnostics.configByteSize.toLocaleString()} bytes</List.Item>
+                      <List.Item>Item discounts: stored as product metafields (not in config)</List.Item>
                     </List>
                     {!diagnostics.hasMetafield && (
                       <Banner tone="warning" title="Config metafield is empty">
@@ -1732,7 +1622,7 @@ export default function DiscountConfigRoute() {
                           {diagnostics.keyValues.item_collection_enabled ? "ON" : "OFF"}
                         </Badge>
                         {" — "}
-                        {diagnostics.keyValues.item_rule_count} rules, {diagnostics.keyValues.item_rule_product_ids} product IDs
+                        {diagnostics.keyValues.item_rule_count} rules (product metafield-based)
                       </List.Item>
                       <List.Item>
                         HVAC:{" "}

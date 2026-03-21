@@ -49,6 +49,12 @@ query Input {
           sku
           product {
             id
+            discountPercent: metafield(
+              namespace: "smart_discount_engine"
+              key: "discount_percent"
+            ) {
+              value
+            }
           }
         }
       }
@@ -56,24 +62,6 @@ query Input {
   }
   shop {
     runtimeConfig: metafield(namespace: "smart_discount_engine", key: "config") {
-      value
-    }
-    runtimeConfigPart1: metafield(namespace: "smart_discount_engine", key: "config-part-1") {
-      value
-    }
-    runtimeConfigPart2: metafield(namespace: "smart_discount_engine", key: "config-part-2") {
-      value
-    }
-    runtimeConfigPart3: metafield(namespace: "smart_discount_engine", key: "config-part-3") {
-      value
-    }
-    runtimeConfigPart4: metafield(namespace: "smart_discount_engine", key: "config-part-4") {
-      value
-    }
-    runtimeConfigPart5: metafield(namespace: "smart_discount_engine", key: "config-part-5") {
-      value
-    }
-    runtimeConfigPart6: metafield(namespace: "smart_discount_engine", key: "config-part-6") {
       value
     }
   }

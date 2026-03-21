@@ -3,7 +3,7 @@ use crate::schema::cart_lines_discounts_generate_run::input::cart::lines::Mercha
 use serde::Deserialize;
 use shopify_function::prelude::*;
 use shopify_function::Result;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 #[derive(Clone)]
 struct LineUnit {
@@ -42,22 +42,6 @@ impl Default for DiscountToggles {
             item_collection_enabled: true,
             collection_spend_enabled: true,
             hvac_enabled: false,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(default)]
-struct ItemCollectionRuleConfig {
-    percent: f64,
-    product_ids: Vec<String>,
-}
-
-impl Default for ItemCollectionRuleConfig {
-    fn default() -> Self {
-        Self {
-            percent: 0.0,
-            product_ids: vec![],
         }
     }
 }
@@ -133,14 +117,7 @@ struct RuntimeConfig {
     bulk10_percent: f64,
     bulk13_percent: f64,
     bulk15_percent: f64,
-    item_collection_rules: Vec<ItemCollectionRuleConfig>,
     hvac_rule: HvacRuleConfig,
-
-    // Legacy fallback fields.
-    item_collection_5_percent: f64,
-    item_collection_10_percent: f64,
-    collection_5_product_ids: Vec<String>,
-    collection_10_product_ids: Vec<String>,
 }
 
 impl Default for RuntimeConfig {
@@ -156,86 +133,46 @@ impl Default for RuntimeConfig {
             bulk10_percent: 0.0,
             bulk13_percent: 0.0,
             bulk15_percent: 0.0,
-            item_collection_rules: vec![],
             hvac_rule: HvacRuleConfig::default(),
-            item_collection_5_percent: 5.0,
-            item_collection_10_percent: 10.0,
-            collection_5_product_ids: vec![],
-            collection_10_product_ids: vec![],
         }
     }
 }
 
-#[derive(Debug, Deserialize, Default)]
-#[serde(default)]
-struct RuntimeConfigChunkManifest {
-    chunked: bool,
-    parts: usize,
-}
+// ── Main function ───────────────────────────────────────────────────────────
 
 #[shopify_function]
 fn cart_lines_discounts_generate_run(
     input: schema::cart_lines_discounts_generate_run::Input,
 ) -> Result<schema::CartLinesDiscountsGenerateRunResult> {
-    let shop = input.shop();
-    let runtime_config_primary = shop.runtime_config().map(|metafield| metafield.value().to_string());
-    let runtime_config_chunks = [
-        shop.runtime_config_part_1()
-            .map(|metafield| metafield.value())
-            .map(|value| value.as_str()),
-        shop.runtime_config_part_2()
-            .map(|metafield| metafield.value())
-            .map(|value| value.as_str()),
-        shop.runtime_config_part_3()
-            .map(|metafield| metafield.value())
-            .map(|value| value.as_str()),
-        shop.runtime_config_part_4()
-            .map(|metafield| metafield.value())
-            .map(|value| value.as_str()),
-        shop.runtime_config_part_5()
-            .map(|metafield| metafield.value())
-            .map(|value| value.as_str()),
-        shop.runtime_config_part_6()
-            .map(|metafield| metafield.value())
-            .map(|value| value.as_str()),
-    ];
+    // Read config from single shop metafield (no more chunking)
+    let config_json = input
+        .shop()
+        .runtime_config()
+        .map(|m| m.value().to_string());
 
-    let runtime_config_json =
-        resolve_runtime_config_json(runtime_config_primary.as_deref(), &runtime_config_chunks);
+    let config = config_json
+        .as_deref()
+        .and_then(parse_runtime_config)
+        .unwrap_or_default();
 
-    log!("[SDE] primary_exists={} chunk_exists=[{},{},{},{},{},{}] resolved_len={}",
-        runtime_config_primary.is_some(),
-        runtime_config_chunks[0].is_some(),
-        runtime_config_chunks[1].is_some(),
-        runtime_config_chunks[2].is_some(),
-        runtime_config_chunks[3].is_some(),
-        runtime_config_chunks[4].is_some(),
-        runtime_config_chunks[5].is_some(),
-        runtime_config_json.as_ref().map(|s| s.len()).unwrap_or(0),
-    );
-
-    let config = parse_runtime_config(runtime_config_json.as_deref()).unwrap_or_default();
-
-    log!("[SDE] toggles: first={} bulk={} vip={} item={} hvac={}",
-        config.toggles.first_order_enabled,
-        config.toggles.bulk_enabled,
-        config.toggles.vip_enabled,
+    log!(
+        "[SDE] config_loaded={} toggles: item={} bulk={} first={} vip={} hvac={}",
+        config_json.is_some(),
         config.toggles.item_collection_enabled,
+        config.toggles.bulk_enabled,
+        config.toggles.first_order_enabled,
+        config.toggles.vip_enabled,
         config.toggles.hvac_enabled,
     );
-    log!("[SDE] bulk_tiers: {}={:.1}% {}={:.1}% {}={:.1}% {}={:.1}%",
+    log!(
+        "[SDE] bulk_tiers: {}={:.1}% {}={:.1}% {}={:.1}% {}={:.1}%",
         config.bulk5_min, config.bulk5_percent,
         config.bulk10_min, config.bulk10_percent,
         config.bulk13_min, config.bulk13_percent,
         config.bulk15_min, config.bulk15_percent,
     );
-    log!("[SDE] item_rules={} first_pct={:.1}",
-        config.item_collection_rules.len(),
-        config.first_order_percent,
-    );
 
     let (first_order_percent, vip_percent) = compute_customer_percents(&input, &config);
-    let item_percents_by_product = build_product_item_percents(&config);
     let hvac_active_rules = active_hvac_rules(&input, &config);
     let cart_subtotal: f64 = input
         .cart()
@@ -243,12 +180,15 @@ fn cart_lines_discounts_generate_run(
         .iter()
         .map(|line| line.cost().subtotal_amount().amount().0)
         .sum();
+    let bulk_percent = compute_bulk_percent(&config, cart_subtotal);
 
-    log!("[SDE] cart_subtotal={:.2} lines={} item_map_size={} bulk_pct={:.1}",
+    log!(
+        "[SDE] cart_subtotal={:.2} lines={} bulk_pct={:.1} first_pct={:.1} vip_pct={:.1}",
         cart_subtotal,
         input.cart().lines().len(),
-        item_percents_by_product.len(),
-        compute_bulk_percent(&config, cart_subtotal),
+        bulk_percent,
+        first_order_percent,
+        vip_percent,
     );
 
     let mut candidates: Vec<schema::ProductDiscountCandidate> = vec![];
@@ -271,21 +211,30 @@ fn cart_lines_discounts_generate_run(
         };
 
         let product_id = normalize_product_id(variant.product().id());
-        let item_percent = item_percents_by_product
-            .get(&product_id)
-            .copied()
-            .unwrap_or(0.0);
-        let bulk_percent = compute_bulk_percent(&config, cart_subtotal);
+
+        // Read item discount percent directly from product metafield
+        let item_percent = if config.toggles.item_collection_enabled {
+            variant
+                .product()
+                .discount_percent()
+                .and_then(|m| parse_metafield_f64(m.value()))
+                .unwrap_or(0.0)
+        } else {
+            0.0
+        };
+
         let base_percent = item_percent
             .max(bulk_percent)
             .max(first_order_percent)
             .max(vip_percent)
             .max(0.0);
 
-        log!("[SDE] line pid={} qty={} subtotal={:.2} item%={:.1} bulk%={:.1} first%={:.1} vip%={:.1} base%={:.1}",
+        log!(
+            "[SDE] line pid={} qty={} subtotal={:.2} item%={:.1} bulk%={:.1} first%={:.1} vip%={:.1} base%={:.1}",
             product_id, line_qty, line_subtotal, item_percent, bulk_percent, first_order_percent, vip_percent, base_percent,
         );
 
+        // ── HVAC discount handling ──────────────────────────────────────────
         let mut hvac_fixed_stackable_qty: i32 = 0;
         let mut hvac_fixed_stackable_amount_total: f64 = 0.0;
         let mut hvac_fixed_exclusive_qty: i32 = 0;
@@ -342,7 +291,7 @@ fn cart_lines_discounts_generate_run(
                 )],
                 message: Some(format!(
                     "Bundle discount: ${} off on {} outdoor unit(s)",
-                    fmt_percent(hvac_fixed_per_item_capped),
+                    fmt_amount(hvac_fixed_per_item_capped),
                     hvac_fixed_exclusive_qty_capped
                 )),
                 value: schema::ProductDiscountCandidateValue::FixedAmount(
@@ -365,14 +314,14 @@ fn cart_lines_discounts_generate_run(
             let message = if hvac_percent_candidate > 0.0 {
                 format!(
                     "Bundle discount: ${} off + {}% on {} outdoor unit(s)",
-                    fmt_percent(hvac_fixed_per_item),
-                    fmt_percent(hvac_percent_candidate),
+                    fmt_amount(hvac_fixed_per_item),
+                    fmt_amount(hvac_percent_candidate),
                     hvac_fixed_stackable_qty_capped
                 )
             } else {
                 format!(
                     "Bundle discount: ${} off on {} outdoor unit(s)",
-                    fmt_percent(hvac_fixed_per_item.min(line_unit_price).max(0.0)),
+                    fmt_amount(hvac_fixed_per_item.min(line_unit_price).max(0.0)),
                     hvac_fixed_stackable_qty_capped
                 )
             };
@@ -407,7 +356,10 @@ fn cart_lines_discounts_generate_run(
                         quantity: Some(hvac_percent_qty),
                     },
                 )],
-                message: Some(format!("Best {}% (Bundle discount)", fmt_percent(hvac_percent_candidate))),
+                message: Some(format!(
+                    "Best {}% (Bundle discount)",
+                    fmt_amount(hvac_percent_candidate)
+                )),
                 value: schema::ProductDiscountCandidateValue::Percentage(schema::Percentage {
                     value: Decimal(hvac_percent_candidate),
                 }),
@@ -416,11 +368,18 @@ fn cart_lines_discounts_generate_run(
         }
 
         if base_percent_candidate > 0.0 && non_hvac_percent_qty > 0 {
-            let message = if bulk_percent > 0.0 && (bulk_percent - base_percent_candidate).abs() < 0.001 {
-                format!("Best {}% (Bulk discount)", fmt_percent(base_percent_candidate))
-            } else {
-                format!("Best {}% (Current promotion)", fmt_percent(base_percent_candidate))
-            };
+            let message =
+                if bulk_percent > 0.0 && (bulk_percent - base_percent_candidate).abs() < 0.001 {
+                    format!(
+                        "Best {}% (Bulk discount)",
+                        fmt_amount(base_percent_candidate)
+                    )
+                } else {
+                    format!(
+                        "Best {}% (Current promotion)",
+                        fmt_amount(base_percent_candidate)
+                    )
+                };
             candidates.push(schema::ProductDiscountCandidate {
                 targets: vec![schema::ProductDiscountCandidateTarget::CartLine(
                     schema::CartLineTarget {
@@ -453,13 +412,12 @@ fn cart_lines_discounts_generate_run(
     })
 }
 
+// ── HVAC rules ──────────────────────────────────────────────────────────────
+
 fn active_hvac_rules(
     input: &schema::cart_lines_discounts_generate_run::Input,
     config: &RuntimeConfig,
 ) -> Vec<HvacActiveRule> {
-    // Legacy-safe behavior:
-    // older saved configs can carry populated HVAC rules while both enable flags are false.
-    // If rules are configured, still evaluate them so checkout behavior doesn't silently drop.
     let has_configured_hvac_rules = !config.hvac_rule.combination_rules.is_empty()
         || (!config.hvac_rule.outdoor_product_ids.is_empty()
             && !config.hvac_rule.indoor_product_ids.is_empty()
@@ -518,9 +476,6 @@ fn active_hvac_rules(
             continue;
         }
 
-        // Legacy-safe fallback:
-        // some saved combo rules may intentionally leave indoor/outdoor lists empty and rely on
-        // global HVAC mapped IDs. Keep those rules functional instead of dropping them.
         let outdoor_source_ids = if rule.outdoor_product_ids.is_empty() {
             &config.hvac_rule.outdoor_product_ids
         } else {
@@ -536,11 +491,11 @@ fn active_hvac_rules(
             continue;
         }
 
-        let outdoor_products: HashSet<String> = outdoor_source_ids
+        let outdoor_products: std::collections::HashSet<String> = outdoor_source_ids
             .iter()
             .map(|pid| normalize_product_id(pid))
             .collect();
-        let indoor_products: HashSet<String> = indoor_source_ids
+        let indoor_products: std::collections::HashSet<String> = indoor_source_ids
             .iter()
             .map(|pid| normalize_product_id(pid))
             .collect();
@@ -681,44 +636,7 @@ fn allocate_high_value_units(units: &[LineUnit], target_qty: i32) -> (HashMap<St
     (by_line, subtotal)
 }
 
-fn build_product_item_percents(config: &RuntimeConfig) -> HashMap<String, f64> {
-    let mut percents: HashMap<String, f64> = HashMap::new();
-
-    if config.toggles.item_collection_enabled && !config.item_collection_rules.is_empty() {
-        for rule in config.item_collection_rules.iter() {
-            let percent = rule.percent.max(0.0);
-            if percent <= 0.0 {
-                continue;
-            }
-            for product_id in rule.product_ids.iter() {
-                let normalized_pid = normalize_product_id(product_id);
-                let entry = percents.entry(normalized_pid).or_insert(0.0);
-                *entry = entry.max(percent);
-            }
-        }
-        return percents;
-    }
-
-    let legacy5 = config.item_collection_5_percent.max(0.0);
-    if legacy5 > 0.0 {
-        for product_id in config.collection_5_product_ids.iter() {
-            let normalized_pid = normalize_product_id(product_id);
-            let entry = percents.entry(normalized_pid).or_insert(0.0);
-            *entry = entry.max(legacy5);
-        }
-    }
-
-    let legacy10 = config.item_collection_10_percent.max(0.0);
-    if legacy10 > 0.0 {
-        for product_id in config.collection_10_product_ids.iter() {
-            let normalized_pid = normalize_product_id(product_id);
-            let entry = percents.entry(normalized_pid).or_insert(0.0);
-            *entry = entry.max(legacy10);
-        }
-    }
-
-    percents
-}
+// ── Helper functions ────────────────────────────────────────────────────────
 
 fn compute_customer_percents(
     input: &schema::cart_lines_discounts_generate_run::Input,
@@ -731,11 +649,12 @@ fn compute_customer_percents(
         return (0.0, 0.0);
     };
 
-    let first_order_percent = if config.toggles.first_order_enabled && *customer.number_of_orders() == 0 {
-        config.first_order_percent.max(0.0)
-    } else {
-        0.0
-    };
+    let first_order_percent =
+        if config.toggles.first_order_enabled && *customer.number_of_orders() == 0 {
+            config.first_order_percent.max(0.0)
+        } else {
+            0.0
+        };
 
     let vip_percent = if config.toggles.vip_enabled {
         customer
@@ -784,69 +703,23 @@ fn compute_bulk_percent(config: &RuntimeConfig, cart_subtotal: f64) -> f64 {
     best.max(0.0)
 }
 
-fn parse_runtime_config(raw_json: Option<&str>) -> Option<RuntimeConfig> {
-    let raw = raw_json?;
+fn parse_runtime_config(raw: &str) -> Option<RuntimeConfig> {
     serde_json::from_str::<RuntimeConfig>(raw).ok().or_else(|| {
+        // Handle double-encoded JSON string
         serde_json::from_str::<String>(raw)
             .ok()
             .and_then(|decoded| serde_json::from_str::<RuntimeConfig>(&decoded).ok())
     })
 }
 
-fn resolve_runtime_config_json(primary: Option<&str>, chunks: &[Option<&str>]) -> Option<String> {
-    let decode_json_string = |raw: &str| -> String {
-        serde_json::from_str::<String>(raw).unwrap_or_else(|_| raw.to_string())
-    };
-
-    let decode_manifest = |raw: &str| -> Option<RuntimeConfigChunkManifest> {
-        serde_json::from_str::<RuntimeConfigChunkManifest>(raw).ok().or_else(|| {
-            serde_json::from_str::<String>(raw)
-                .ok()
-                .and_then(|decoded| serde_json::from_str::<RuntimeConfigChunkManifest>(&decoded).ok())
-        })
-    };
-
-    if let Some(raw) = primary {
-        if let Some(manifest) = decode_manifest(raw) {
-            if manifest.chunked {
-                if manifest.parts == 0 || manifest.parts > chunks.len() {
-                    return None;
-                }
-
-                let mut joined = String::new();
-                for idx in 0..manifest.parts {
-                    let Some(part) = chunks[idx] else {
-                        return None;
-                    };
-                    let decoded_part = decode_json_string(part);
-                    if decoded_part.is_empty() {
-                        return None;
-                    }
-                    joined.push_str(&decoded_part);
-                }
-                return Some(joined);
-            }
-        }
-
-        let decoded_primary = decode_json_string(raw);
-        if !decoded_primary.is_empty() {
-            return Some(decoded_primary);
-        }
+/// Parse metafield value as f64 — handles both bare numbers and JSON strings.
+fn parse_metafield_f64(value: &str) -> Option<f64> {
+    // Try parsing as a JSON value first (handles quoted strings like "\"10.5\"")
+    if let Ok(s) = serde_json::from_str::<String>(value) {
+        return s.parse::<f64>().ok();
     }
-
-    let mut fallback = String::new();
-    for part in chunks.iter().flatten() {
-        let decoded_part = decode_json_string(part);
-        if !decoded_part.is_empty() {
-            fallback.push_str(&decoded_part);
-        }
-    }
-
-    if fallback.is_empty() {
-        None
-    } else {
-        Some(fallback)
-    }
+    // Try direct parse
+    value.parse::<f64>().ok()
 }
 
 fn normalize_product_id(raw: &str) -> String {
@@ -855,7 +728,7 @@ fn normalize_product_id(raw: &str) -> String {
         .to_string()
 }
 
-fn fmt_percent(value: f64) -> String {
+fn fmt_amount(value: f64) -> String {
     if (value - value.round()).abs() < 0.001 {
         format!("{:.0}", value)
     } else {
@@ -865,24 +738,22 @@ fn fmt_percent(value: f64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_runtime_config, resolve_runtime_config_json, RuntimeConfig};
-
-    #[test]
-    fn resolves_chunked_runtime_config_manifest() {
-        let primary = r#"{"chunked":true,"parts":2}"#;
-        let chunks = [Some("{\"item_collection_rules\":["), Some("]}"), None];
-        let resolved = resolve_runtime_config_json(Some(primary), &chunks);
-        assert_eq!(
-            resolved.as_deref(),
-            Some("{\"item_collection_rules\":[]}")
-        );
-    }
+    use super::*;
 
     #[test]
     fn parses_runtime_config_object() {
-        let parsed = parse_runtime_config(Some("{\"item_collection_rules\":[{\"percent\":17,\"product_ids\":[\"gid://shopify/Product/1\"]}]}"));
-        let cfg: RuntimeConfig = parsed.unwrap_or_default();
-        assert_eq!(cfg.item_collection_rules.len(), 1);
-        assert_eq!(cfg.item_collection_rules[0].percent, 17.0);
+        let parsed = parse_runtime_config(
+            r#"{"toggles":{"bulk_enabled":true},"bulk5_min":5000,"bulk5_percent":5}"#,
+        );
+        let cfg = parsed.unwrap();
+        assert_eq!(cfg.bulk5_min, 5000);
+        assert_eq!(cfg.bulk5_percent, 5.0);
+    }
+
+    #[test]
+    fn parse_metafield_f64_works() {
+        assert_eq!(parse_metafield_f64("10.5"), Some(10.5));
+        assert_eq!(parse_metafield_f64("\"10.51\""), Some(10.51));
+        assert_eq!(parse_metafield_f64("7"), Some(7.0));
     }
 }
