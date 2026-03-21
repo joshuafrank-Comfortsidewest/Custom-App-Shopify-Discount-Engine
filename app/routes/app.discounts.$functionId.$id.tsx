@@ -389,16 +389,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     admin.graphql(`
       #graphql
       query ActiveDiscounts {
-        automaticDiscountNodes(first: 50) {
+        discountNodes(first: 50, query: "discount_type:app") {
           nodes {
             id
-            automaticDiscount {
+            discount {
               __typename
               ... on DiscountAutomaticApp {
-                title
-                status
-              }
-              ... on DiscountAutomaticBasic {
                 title
                 status
               }
@@ -458,16 +454,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }));
 
   // Extract active discount info for diagnostics
-  const discountNodes = discountRes?.data?.automaticDiscountNodes?.nodes ?? [];
+  const discountNodes = discountRes?.data?.discountNodes?.nodes ?? [];
   const activeAppDiscounts = discountNodes
     .filter((n: any) => {
-      const d = n?.automaticDiscount;
+      const d = n?.discount;
       return d?.__typename === "DiscountAutomaticApp" && d?.status === "ACTIVE";
     })
     .map((n: any) => ({
       id: n.id,
-      title: n.automaticDiscount.title ?? "Untitled",
-      status: n.automaticDiscount.status ?? "unknown",
+      title: n.discount.title ?? "Untitled",
+      status: n.discount.status ?? "unknown",
     }));
 
   // Raw metafield diagnostic: show what the Rust function would parse
