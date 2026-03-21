@@ -106,6 +106,18 @@ impl Default for HvacRuleConfig {
 
 #[derive(Debug, Deserialize)]
 #[serde(default)]
+struct HvacConfigOverlay {
+    combination_rules: Vec<HvacCombinationRuleConfig>,
+}
+
+impl Default for HvacConfigOverlay {
+    fn default() -> Self {
+        Self { combination_rules: vec![] }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
 struct RuntimeConfig {
     toggles: DiscountToggles,
     first_order_percent: f64,
@@ -144,16 +156,26 @@ impl Default for RuntimeConfig {
 fn cart_lines_discounts_generate_run(
     input: schema::cart_lines_discounts_generate_run::Input,
 ) -> Result<schema::CartLinesDiscountsGenerateRunResult> {
-    // Read config from single shop metafield (no more chunking)
+    // Read main config from shop metafield (small — toggles, bulk tiers, spend rule)
     let config_json = input
         .shop()
         .runtime_config()
         .map(|m| m.value().to_string());
 
-    let config = config_json
+    let mut config = config_json
         .as_deref()
         .and_then(parse_runtime_config)
         .unwrap_or_default();
+
+    // HVAC combo rules are stored in a separate metafield to keep main config < 10KB.
+    // Overlay them now if HVAC is enabled.
+    if config.toggles.hvac_enabled {
+        if let Some(hvac_value) = input.shop().hvac_config().map(|m| m.value()) {
+            if let Ok(overlay) = serde_json::from_str::<HvacConfigOverlay>(hvac_value) {
+                config.hvac_rule.combination_rules = overlay.combination_rules;
+            }
+        }
+    }
 
     log!(
         "[SDE] config_loaded={} toggles: item={} bulk={} first={} vip={} hvac={}",

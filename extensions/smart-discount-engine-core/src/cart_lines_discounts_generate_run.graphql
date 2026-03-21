@@ -64,5 +64,8 @@ query Input {
     runtimeConfig: metafield(namespace: "smart_discount_engine", key: "config") {
       value
     }
+    hvacConfig: metafield(namespace: "smart_discount_engine", key: "hvac_config") {
+      value
+    }
   }
 }

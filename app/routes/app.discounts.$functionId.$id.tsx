@@ -535,9 +535,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     collection_spend_rule,
   };
 
-  const serializedConfig = JSON.stringify(fullConfig);
+  // Split HVAC combo rules into a separate shop metafield to keep main config < 10KB.
+  // Shopify Functions null metafield values larger than ~10KB in their input.
+  const { combination_rules: hvacComboRules, ...hvacRuleWithoutCombos } = fullConfig.hvac_rule;
+  const mainConfig = { ...fullConfig, hvac_rule: { ...hvacRuleWithoutCombos, combination_rules: [] } };
+  const hvacConfigPayload = { combination_rules: hvacComboRules };
+
+  const serializedConfig = JSON.stringify(mainConfig);
+  const serializedHvacConfig = JSON.stringify(hvacConfigPayload);
   const configSize = Buffer.byteLength(serializedConfig, "utf8");
+  const hvacConfigSize = Buffer.byteLength(serializedHvacConfig, "utf8");
   productCounts.push({ label: "Config size (bytes)", count: configSize });
+  productCounts.push({ label: "HVAC config size (bytes)", count: hvacConfigSize });
 
   // Get shop GID for shop-level metafields
   const shopRes = await admin.graphql(`
@@ -555,32 +564,60 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const errors: string[] = [];
 
-  // 1. Save config to single shop metafield (no chunking needed — config is ~12 KB)
-  const saveRes = await admin.graphql(
-    `
-    #graphql
-    mutation SaveRuntimeConfig($metafields: [MetafieldsSetInput!]!) {
-      metafieldsSet(metafields: $metafields) {
-        userErrors { field message }
-      }
-    }`,
-    {
-      variables: {
-        metafields: [
-          {
-            ownerId: shopId,
-            namespace: "smart_discount_engine",
-            key: "config",
-            type: "json",
-            value: serializedConfig,
-          },
-        ],
+  // 1. Save main config + HVAC config to separate shop metafields.
+  //    Main config stays < 10KB (Shopify Functions null values above ~10KB).
+  //    HVAC combo rules are split into hvac_config metafield, read only when HVAC is enabled.
+  const [saveRes, hvacSaveRes] = await Promise.all([
+    admin.graphql(
+      `#graphql
+      mutation SaveRuntimeConfig($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          userErrors { field message }
+        }
+      }`,
+      {
+        variables: {
+          metafields: [
+            {
+              ownerId: shopId,
+              namespace: "smart_discount_engine",
+              key: "config",
+              type: "multi_line_text_field",
+              value: serializedConfig,
+            },
+          ],
+        },
       },
-    },
-  );
+    ),
+    admin.graphql(
+      `#graphql
+      mutation SaveHvacConfig($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          userErrors { field message }
+        }
+      }`,
+      {
+        variables: {
+          metafields: [
+            {
+              ownerId: shopId,
+              namespace: "smart_discount_engine",
+              key: "hvac_config",
+              type: "multi_line_text_field",
+              value: serializedHvacConfig,
+            },
+          ],
+        },
+      },
+    ),
+  ]);
   const saveData = await saveRes.json();
   for (const e of saveData?.data?.metafieldsSet?.userErrors ?? []) {
     errors.push(String(e?.message ?? "Unknown error"));
+  }
+  const hvacSaveData = await hvacSaveRes.json();
+  for (const e of hvacSaveData?.data?.metafieldsSet?.userErrors ?? []) {
+    errors.push(`HVAC config: ${e?.message ?? "Unknown error"}`);
   }
 
   // 2. Batch-set discount_percent metafield on each product in item rules.
