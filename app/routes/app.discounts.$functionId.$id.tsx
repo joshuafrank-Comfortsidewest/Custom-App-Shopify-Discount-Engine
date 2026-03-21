@@ -701,14 +701,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       type: "json",
       value: manifest,
     },
-    ...parts.map((part, i) => ({
+  ];
+  // Always write ALL part metafields so old chunked data gets overwritten.
+  // Without this, stale parts can push the function's input over 128 KB,
+  // causing Shopify to null out every metafield.
+  for (let i = 0; i < MAX_PARTS; i++) {
+    metafields.push({
       ownerId: shopId,
       namespace: "smart_discount_engine",
       key: `config-part-${i + 1}`,
       type: "json",
-      value: JSON.stringify(part), // fragment wrapped as a JSON string → valid JSON
-    })),
-  ];
+      value: i < parts.length ? JSON.stringify(parts[i]) : '""',
+    });
+  }
 
   const saveRes = await admin.graphql(
     `
