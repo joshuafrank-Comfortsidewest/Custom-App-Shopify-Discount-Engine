@@ -17,11 +17,11 @@ export default function AppHome() {
           <Card>
             <BlockStack gap="300">
               <Text as="h2" variant="headingMd">
-                Clean v2 baseline is live
+                Smart Discount Engine v2
               </Text>
               <Text as="p" variant="bodyMd">
-                This app was reset from scratch. The current discount function
-                is intentionally a safe no-op while new logic is rebuilt.
+                The checkout function applies first-order, bulk, VIP, item collection,
+                and HVAC bundle discounts based on your saved configuration.
               </Text>
               <Text as="p" variant="bodyMd">
                 Continue on the{" "}

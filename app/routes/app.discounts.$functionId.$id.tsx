@@ -92,6 +92,7 @@ type HvacMappingEntry = {
   sourceSeries: string | null;
   sourceSystem: string | null;
   sourceBtu: number | null;
+  sourceRefrigerant: string | null;
   mappedProductId: string | null;
   mappedProductTitle: string | null;
   matchStatus: string;
@@ -313,18 +314,11 @@ function parseShopConfig(primary: string | null, parts: Array<string | null>): R
 type HvacCompatMapping = {
   sourceSku: string;
   sourceBrand?: string | null;
-  sourceSystem?: string | null;
+  sourceRefrigerant?: string | null;
 };
 
 function normalizeCompare(value: string | null | undefined): string {
   return String(value ?? "").trim().toUpperCase();
-}
-
-function extractRefrigerant(value: string | null | undefined): string {
-  const upper = normalizeCompare(value);
-  if (!upper) return "";
-  const match = upper.match(/R\s*-?\s*\d{3,4}[A-Z]?/);
-  return match ? match[0].replace(/[\s-]/g, "") : "";
 }
 
 function isIndoorCompatibleWithOutdoor(
@@ -333,8 +327,8 @@ function isIndoorCompatibleWithOutdoor(
 ): boolean {
   const indoorBrand = normalizeCompare(indoor.sourceBrand);
   const outdoorBrand = normalizeCompare(outdoor.sourceBrand);
-  const indoorRef = extractRefrigerant(indoor.sourceSystem);
-  const outdoorRef = extractRefrigerant(outdoor.sourceSystem);
+  const indoorRef = normalizeCompare(indoor.sourceRefrigerant);
+  const outdoorRef = normalizeCompare(outdoor.sourceRefrigerant);
 
   if (!indoorBrand || !outdoorBrand || !indoorRef || !outdoorRef) return false;
   return indoorBrand === outdoorBrand && indoorRef === outdoorRef;
@@ -372,7 +366,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const shop = session.shop;
 
-  const [collections, configRes, hvacMappings] = await Promise.all([
+  const [collections, configRes, hvacMappings, discountRes] = await Promise.all([
     fetchCollections(admin),
     admin.graphql(`
       #graphql
@@ -392,6 +386,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       where: { shop, matchStatus: { in: ["auto_exact", "manual"] } },
       orderBy: [{ sourceType: "asc" }, { sourceBrand: "asc" }, { sourceSku: "asc" }],
     }),
+    admin.graphql(`
+      #graphql
+      query ActiveDiscounts {
+        discountNodes(first: 50, query: "status:active") {
+          nodes {
+            id
+            discount {
+              __typename
+              ... on DiscountAutomaticApp {
+                title
+                status
+                appDiscountType { title functionId }
+              }
+            }
+          }
+        }
+      }
+    `).then((r: any) => r.json()).catch(() => null),
   ]);
 
   const configData = await configRes.json();
@@ -417,6 +429,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       sourceSeries: m.sourceSeries,
       sourceSystem: m.sourceSystem,
       sourceBtu: m.sourceBtu,
+      sourceRefrigerant: m.sourceRefrigerant,
       mappedProductId: m.mappedProductId,
       mappedProductTitle: m.mappedProductTitle,
       matchStatus: m.matchStatus,
@@ -432,12 +445,85 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       sourceSeries: m.sourceSeries,
       sourceSystem: m.sourceSystem,
       sourceBtu: m.sourceBtu,
+      sourceRefrigerant: m.sourceRefrigerant,
       mappedProductId: m.mappedProductId,
       mappedProductTitle: m.mappedProductTitle,
       matchStatus: m.matchStatus,
     }));
 
-  return json({ config, collections, indoorMappings, outdoorMappings });
+  // Extract active discount info for diagnostics
+  const discountNodes = discountRes?.data?.discountNodes?.nodes ?? [];
+  const activeAppDiscounts = discountNodes
+    .filter((n: any) => n?.discount?.__typename === "DiscountAutomaticApp")
+    .map((n: any) => ({
+      id: n.id,
+      title: n.discount.title ?? "Untitled",
+      status: n.discount.status ?? "unknown",
+      functionId: n.discount.appDiscountType?.functionId ?? null,
+    }));
+
+  // Raw metafield diagnostic: show what the Rust function would parse
+  const rawPrimary = shopData?.runtimeConfig?.value ?? null;
+  const rawParts = [
+    shopData?.part1?.value ?? null,
+    shopData?.part2?.value ?? null,
+    shopData?.part3?.value ?? null,
+    shopData?.part4?.value ?? null,
+    shopData?.part5?.value ?? null,
+    shopData?.part6?.value ?? null,
+  ];
+  const isChunked = (() => {
+    if (!rawPrimary) return false;
+    try {
+      const decoded = decodeJsonString(rawPrimary);
+      const manifest = JSON.parse(decoded);
+      return Boolean(manifest?.chunked);
+    } catch {
+      return false;
+    }
+  })();
+  const configByteSize = (() => {
+    try {
+      return Buffer.byteLength(JSON.stringify(config), "utf8");
+    } catch {
+      return 0;
+    }
+  })();
+
+  return json({
+    config,
+    collections,
+    indoorMappings,
+    outdoorMappings,
+    diagnostics: {
+      activeAppDiscounts,
+      hasMetafield: Boolean(rawPrimary),
+      isChunked,
+      configByteSize,
+      partsWithData: rawParts.filter(Boolean).length,
+      keyValues: {
+        first_order_enabled: config.toggles.first_order_enabled,
+        first_order_percent: config.first_order_percent,
+        bulk_enabled: config.toggles.bulk_enabled,
+        bulk5_min: config.bulk5_min,
+        bulk5_percent: config.bulk5_percent,
+        bulk10_min: config.bulk10_min,
+        bulk10_percent: config.bulk10_percent,
+        bulk13_min: config.bulk13_min,
+        bulk13_percent: config.bulk13_percent,
+        bulk15_min: config.bulk15_min,
+        bulk15_percent: config.bulk15_percent,
+        vip_enabled: config.toggles.vip_enabled,
+        item_collection_enabled: config.toggles.item_collection_enabled,
+        item_rule_count: config.item_collection_rules.length,
+        item_rule_product_ids: config.item_collection_rules.reduce((s, r) => s + (r.product_ids?.length ?? 0), 0),
+        hvac_enabled: config.toggles.hvac_enabled,
+        hvac_indoor_ids: config.hvac_rule.indoor_product_ids.length,
+        hvac_outdoor_ids: config.hvac_rule.outdoor_product_ids.length,
+        hvac_combo_rules: config.hvac_rule.combination_rules?.length ?? 0,
+      },
+    },
+  });
 };
 
 // ── Action ─────────────────────────────────────────────────────────────────────
@@ -472,18 +558,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     where: { shop, matchStatus: { in: ["auto_exact", "manual"] }, mappedProductId: { not: null } },
   });
 
-  const indoorIds = [
+  const indoorIds: string[] = [
     ...new Set(
       allHvacMappings
         .filter((m) => m.sourceType === "indoor" && m.mappedProductId)
-        .map((m) => m.mappedProductId!),
+        .map((m) => m.mappedProductId as string),
     ),
   ];
-  const outdoorIds = [
+  const outdoorIds: string[] = [
     ...new Set(
       allHvacMappings
         .filter((m) => m.sourceType === "outdoor" && m.mappedProductId)
-        .map((m) => m.mappedProductId!),
+        .map((m) => m.mappedProductId as string),
     ),
   ];
 
@@ -652,7 +738,7 @@ type CombinationRuleState = {
 };
 
 export default function DiscountConfigRoute() {
-  const { config, collections, indoorMappings, outdoorMappings } = useLoaderData<typeof loader>();
+  const { config, collections, indoorMappings, outdoorMappings, diagnostics } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const indoorMappingEntries = indoorMappings as HvacMappingEntry[];
   const outdoorMappingEntries = outdoorMappings as HvacMappingEntry[];
@@ -804,13 +890,13 @@ export default function DiscountConfigRoute() {
           enabled: r.enabled,
           outdoor_source_sku: r.outdoor_source_sku,
           allowed_indoor_skus: r.allowed_indoor_skus,
-          outdoor_product_ids: [],
-          indoor_product_ids: [],
+          outdoor_product_ids: [] as string[],
+          indoor_product_ids: [] as string[],
           min_indoor_per_outdoor: Number(r.min_indoor_per_outdoor) || 2,
           max_indoor_per_outdoor: Number(r.max_indoor_per_outdoor) || 6,
           percent_off_hvac_products: Number(r.percent_off_hvac_products) || 0,
           amount_off_outdoor_per_bundle: Number(r.amount_off_outdoor_per_bundle) || 0,
-          stack_mode: r.stack_mode,
+          stack_mode: r.stack_mode as HvacCombinationRule["stack_mode"],
         })),
       },
       collection_spend_rule: {
@@ -1282,7 +1368,7 @@ export default function DiscountConfigRoute() {
                               {compatibleIndoorMappings.map((m) => (
                                 <Checkbox
                                   key={m.sourceSku}
-                                  label={`${m.sourceSku} — ${m.sourceBrand ?? ""} ${m.sourceSystem ?? ""} ${m.sourceBtu ? m.sourceBtu + " BTU" : ""}`}
+                                  label={`${m.sourceSku} — ${m.sourceBrand ?? ""} ${m.sourceSystem ?? ""} ${m.sourceRefrigerant ?? ""} ${m.sourceBtu ? m.sourceBtu + " BTU" : ""}`}
                                   checked={rule.allowed_indoor_skus.includes(m.sourceSku)}
                                   onChange={(checked) =>
                                     setComboRules((p) =>
@@ -1532,63 +1618,155 @@ export default function DiscountConfigRoute() {
           {/* ── Status ── */}
           {section === "status" && (
             <Layout.Section>
-              <Card>
-                <BlockStack gap="300">
-                  <Text as="h3" variant="headingSm">
-                    Current Saved Config
-                  </Text>
-                  <List type="bullet">
-                    <List.Item>
-                      Item rules: {config.item_collection_rules.length} —{" "}
-                      <Badge tone={totalItemProducts > 0 ? "success" : "attention"}>
-                        {`${totalItemProducts} product IDs`}
-                      </Badge>
-                    </List.Item>
-                    <List.Item>
-                      HVAC:{" "}
-                      <Badge tone={config.toggles.hvac_enabled ? "success" : "attention"}>
-                        {config.toggles.hvac_enabled ? "Enabled" : "Disabled"}
-                      </Badge>
-                      {" — "}
-                      {config.hvac_rule.indoor_product_ids.length} indoor /{" "}
-                      {config.hvac_rule.outdoor_product_ids.length} outdoor /{" "}
-                      {config.hvac_rule.combination_rules?.length ?? 0} combination rules
-                    </List.Item>
-                    <List.Item>
-                      HVAC Mapping:{" "}
-                      <Badge tone="info">{`${(indoorMappings as HvacMappingEntry[]).length} indoor mapped`}</Badge>{" "}
-                      <Badge tone="info">{`${(outdoorMappings as HvacMappingEntry[]).length} outdoor mapped`}</Badge>
-                    </List.Item>
-                    <List.Item>
-                      Collection spend:{" "}
-                      <Badge tone={config.toggles.collection_spend_enabled ? "success" : "attention"}>
-                        {config.toggles.collection_spend_enabled ? "Enabled" : "Disabled"}
-                      </Badge>
-                      {" — $"}
-                      {config.collection_spend_rule.amount_off_per_step} off per ${config.collection_spend_rule.spend_step_amount} spent
-                      {" — "}
-                      {config.collection_spend_rule.product_ids.length} product IDs
-                    </List.Item>
-                    <List.Item>
-                      Block if discount code entered:{" "}
-                      {config.block_if_any_entered_discount_code ? "Yes" : "No"}
-                    </List.Item>
-                    <List.Item>
-                      Return conflict codes:{" "}
-                      {config.return_conflict_enabled
-                        ? config.return_blocked_codes.join(", ")
-                        : "disabled"}
-                    </List.Item>
-                    <List.Item>
-                      Storage: shop metafields (smart_discount_engine/config + parts 1–6)
-                    </List.Item>
-                  </List>
-                  <Text as="p" variant="bodyMd" tone="subdued">
-                    Config is chunked at 45 KB per part. Max 6 parts = 270 KB capacity. The
-                    checkout function reads these at runtime with no Shopify query complexity cost.
-                  </Text>
-                </BlockStack>
-              </Card>
+              <BlockStack gap="400">
+                {/* Active Discount Check */}
+                <Card>
+                  <BlockStack gap="300">
+                    <Text as="h3" variant="headingSm">
+                      Active Discounts (Shopify Admin)
+                    </Text>
+                    {diagnostics.activeAppDiscounts.length === 0 ? (
+                      <Banner tone="critical" title="No active app discounts found!">
+                        <Text as="p" variant="bodyMd">
+                          The checkout function will NOT run unless there is an active automatic
+                          discount using this app. Go to Shopify Admin &gt; Discounts and create
+                          one using &quot;Smart Discount Engine 2&quot;, or re-activate an existing one.
+                        </Text>
+                      </Banner>
+                    ) : (
+                      <List type="bullet">
+                        {diagnostics.activeAppDiscounts.map((d: any, i: number) => (
+                          <List.Item key={i}>
+                            <Badge tone="success">ACTIVE</Badge>{" "}
+                            {d.title} — Function: {d.functionId ?? "unknown"}
+                          </List.Item>
+                        ))}
+                      </List>
+                    )}
+                  </BlockStack>
+                </Card>
+
+                {/* Metafield Storage */}
+                <Card>
+                  <BlockStack gap="300">
+                    <Text as="h3" variant="headingSm">
+                      Metafield Config Storage
+                    </Text>
+                    <List type="bullet">
+                      <List.Item>
+                        Metafield exists:{" "}
+                        <Badge tone={diagnostics.hasMetafield ? "success" : "critical"}>
+                          {diagnostics.hasMetafield ? "Yes" : "No"}
+                        </Badge>
+                      </List.Item>
+                      <List.Item>Chunked: {diagnostics.isChunked ? "Yes" : "No"}</List.Item>
+                      <List.Item>Parts with data: {diagnostics.partsWithData}</List.Item>
+                      <List.Item>Config size: {diagnostics.configByteSize.toLocaleString()} bytes</List.Item>
+                    </List>
+                    {!diagnostics.hasMetafield && (
+                      <Banner tone="warning" title="Config metafield is empty">
+                        <Text as="p" variant="bodyMd">
+                          Click &quot;Save Config&quot; to write the config to shop metafields. The checkout
+                          function reads these metafields at runtime.
+                        </Text>
+                      </Banner>
+                    )}
+                  </BlockStack>
+                </Card>
+
+                {/* What the Rust Function Sees */}
+                <Card>
+                  <BlockStack gap="300">
+                    <Text as="h3" variant="headingSm">
+                      Config Values (what the checkout function uses)
+                    </Text>
+                    <Text as="p" variant="bodyMd" tone="subdued">
+                      These are the values from the saved metafield. If they look wrong, click Save Config
+                      to re-write them. Then run &quot;shopify app deploy&quot; to update the Rust function.
+                    </Text>
+                    <List type="bullet">
+                      <List.Item>
+                        First Order:{" "}
+                        <Badge tone={diagnostics.keyValues.first_order_enabled ? "success" : "attention"}>
+                          {diagnostics.keyValues.first_order_enabled ? "ON" : "OFF"}
+                        </Badge>
+                        {" — "}
+                        {diagnostics.keyValues.first_order_percent}% (requires logged-in customer with 0 orders)
+                      </List.Item>
+                      <List.Item>
+                        Bulk:{" "}
+                        <Badge tone={diagnostics.keyValues.bulk_enabled ? "success" : "attention"}>
+                          {diagnostics.keyValues.bulk_enabled ? "ON" : "OFF"}
+                        </Badge>
+                        {" — "}
+                        Tiers: ${diagnostics.keyValues.bulk5_min}={diagnostics.keyValues.bulk5_percent}%,
+                        ${diagnostics.keyValues.bulk10_min}={diagnostics.keyValues.bulk10_percent}%,
+                        ${diagnostics.keyValues.bulk13_min}={diagnostics.keyValues.bulk13_percent}%,
+                        ${diagnostics.keyValues.bulk15_min}={diagnostics.keyValues.bulk15_percent}%
+                      </List.Item>
+                      <List.Item>
+                        VIP:{" "}
+                        <Badge tone={diagnostics.keyValues.vip_enabled ? "success" : "attention"}>
+                          {diagnostics.keyValues.vip_enabled ? "ON" : "OFF"}
+                        </Badge>
+                        {" — "}
+                        (requires logged-in customer with VIP3–VIP25 tags)
+                      </List.Item>
+                      <List.Item>
+                        Item Collection:{" "}
+                        <Badge tone={diagnostics.keyValues.item_collection_enabled ? "success" : "attention"}>
+                          {diagnostics.keyValues.item_collection_enabled ? "ON" : "OFF"}
+                        </Badge>
+                        {" — "}
+                        {diagnostics.keyValues.item_rule_count} rules, {diagnostics.keyValues.item_rule_product_ids} product IDs
+                      </List.Item>
+                      <List.Item>
+                        HVAC:{" "}
+                        <Badge tone={diagnostics.keyValues.hvac_enabled ? "success" : "attention"}>
+                          {diagnostics.keyValues.hvac_enabled ? "ON" : "OFF"}
+                        </Badge>
+                        {" — "}
+                        {diagnostics.keyValues.hvac_indoor_ids} indoor / {diagnostics.keyValues.hvac_outdoor_ids} outdoor /
+                        {" "}{diagnostics.keyValues.hvac_combo_rules} combo rules
+                      </List.Item>
+                    </List>
+                  </BlockStack>
+                </Card>
+
+                {/* Deployment Instructions */}
+                <Card>
+                  <BlockStack gap="300">
+                    <Text as="h3" variant="headingSm">
+                      Deployment Checklist
+                    </Text>
+                    <Banner tone="info" title="Important: Two deployments are needed">
+                      <List type="number">
+                        <List.Item>
+                          <strong>Render (auto)</strong>: Push to GitHub — the admin UI auto-deploys to Render.
+                        </List.Item>
+                        <List.Item>
+                          <strong>Shopify Function (manual)</strong>: Run <code>shopify app deploy</code> from
+                          your terminal to compile and upload the Rust WASM checkout function to Shopify.
+                          Without this, the function on Shopify still uses the old code.
+                        </List.Item>
+                        <List.Item>
+                          <strong>Save Config</strong>: After deploying, click Save Config here to write
+                          the latest settings to shop metafields.
+                        </List.Item>
+                        <List.Item>
+                          <strong>Active Discount</strong>: Ensure there is an active automatic discount
+                          in Shopify Admin &gt; Discounts using &quot;Smart Discount Engine 2&quot;.
+                        </List.Item>
+                      </List>
+                    </Banner>
+                    <Text as="p" variant="bodyMd" tone="subdued">
+                      The bulk discount currently compares cart subtotal ($) against the tier thresholds.
+                      For bulk to trigger, the customer needs a cart subtotal of at least ${diagnostics.keyValues.bulk5_min}.
+                      First-order and VIP require logged-in customers.
+                    </Text>
+                  </BlockStack>
+                </Card>
+              </BlockStack>
             </Layout.Section>
           )}
 
