@@ -1,6 +1,29 @@
 -- CreateTable
+CREATE TABLE "Session" (
+    "id" TEXT NOT NULL,
+    "shop" TEXT NOT NULL,
+    "state" TEXT NOT NULL,
+    "isOnline" BOOLEAN NOT NULL DEFAULT false,
+    "scope" TEXT,
+    "expires" TIMESTAMP(3),
+    "accessToken" TEXT NOT NULL,
+    "userId" BIGINT,
+    "firstName" TEXT,
+    "lastName" TEXT,
+    "email" TEXT,
+    "accountOwner" BOOLEAN NOT NULL DEFAULT false,
+    "locale" TEXT,
+    "collaborator" BOOLEAN DEFAULT false,
+    "emailVerified" BOOLEAN DEFAULT false,
+    "refreshToken" TEXT,
+    "refreshTokenExpires" TIMESTAMP(3),
+
+    CONSTRAINT "Session_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "HvacSkuMapping" (
-    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    "id" SERIAL NOT NULL,
     "shop" TEXT NOT NULL,
     "sourceSku" TEXT NOT NULL,
     "sourceType" TEXT,
@@ -17,13 +40,15 @@ CREATE TABLE "HvacSkuMapping" (
     "mappedProductUrl" TEXT,
     "matchStatus" TEXT NOT NULL DEFAULT 'unmapped',
     "note" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "HvacSkuMapping_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "AutoTagJob" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "shop" TEXT NOT NULL,
     "discountNodeId" TEXT NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'running',
@@ -39,15 +64,17 @@ CREATE TABLE "AutoTagJob" (
     "totalCount" INTEGER NOT NULL DEFAULT 0,
     "changedCount" INTEGER NOT NULL DEFAULT 0,
     "skippedProtectedCount" INTEGER NOT NULL DEFAULT 0,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "AutoTagJob_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
-CREATE INDEX "HvacSkuMapping_shop_matchStatus_idx" ON "HvacSkuMapping"("shop", "matchStatus");
+CREATE UNIQUE INDEX "HvacSkuMapping_shop_sourceSku_key" ON "HvacSkuMapping"("shop", "sourceSku");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "HvacSkuMapping_shop_sourceSku_key" ON "HvacSkuMapping"("shop", "sourceSku");
+CREATE INDEX "HvacSkuMapping_shop_matchStatus_idx" ON "HvacSkuMapping"("shop", "matchStatus");
 
 -- CreateIndex
 CREATE INDEX "AutoTagJob_shop_discountNodeId_status_idx" ON "AutoTagJob"("shop", "discountNodeId", "status");
