@@ -244,6 +244,7 @@ fn cart_lines_discounts_generate_run(
         .map(|line| line.cost().subtotal_amount().amount().0)
         .sum();
     let bulk_percent = compute_bulk_percent(&config, cart_subtotal);
+    let discount_source = determine_discount_source(first_order_percent, vip_percent, bulk_percent);
 
     log!(
         "[SDE] cart_subtotal={:.2} lines={} bulk_pct={:.1} first_pct={:.1} vip_pct={:.1}",
@@ -514,18 +515,12 @@ fn cart_lines_discounts_generate_run(
         }
 
         if base_percent_candidate > 0.0 && non_hvac_percent_qty > 0 {
-            let message =
-                if bulk_percent > 0.0 && (bulk_percent - base_percent_candidate).abs() < 0.001 {
-                    format!(
-                        "Best {}% (Bulk discount)",
-                        fmt_amount(base_percent_candidate)
-                    )
-                } else {
-                    format!(
-                        "Best {}% (Current promotion)",
-                        fmt_amount(base_percent_candidate)
-                    )
-                };
+            let message = match discount_source.as_str() {
+                "vip" => format!("Best {}% (VIP discount)", fmt_amount(base_percent_candidate)),
+                "first_order" => format!("Best {}% (First Order)", fmt_amount(base_percent_candidate)),
+                "bulk" => format!("Best {}% (Bulk discount)", fmt_amount(base_percent_candidate)),
+                _ => format!("Best {}% (Current promotion)", fmt_amount(base_percent_candidate)),
+            };
             candidates.push(schema::ProductDiscountCandidate {
                 targets: vec![schema::ProductDiscountCandidateTarget::CartLine(
                     schema::CartLineTarget {
@@ -849,6 +844,27 @@ fn vip_percent_from_tag(tag: &str) -> Option<f64> {
     } else {
         None
     }
+}
+
+fn determine_discount_source(
+    first_order_percent: f64,
+    vip_percent: f64,
+    bulk_percent: f64,
+) -> String {
+    // VIP takes precedence if available
+    if vip_percent > 0.0 && (vip_percent - first_order_percent.max(bulk_percent)).abs() < 0.001 {
+        return "vip".to_string();
+    }
+    // First order takes precedence over bulk
+    if first_order_percent > 0.0 && (first_order_percent - bulk_percent).abs() < 0.001 {
+        return "first_order".to_string();
+    }
+    // Bulk
+    if bulk_percent > 0.0 {
+        return "bulk".to_string();
+    }
+    // Default
+    "current_promotion".to_string()
 }
 
 fn compute_bulk_percent(config: &RuntimeConfig, cart_subtotal: f64) -> f64 {

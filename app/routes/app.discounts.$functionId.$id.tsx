@@ -240,6 +240,7 @@ type HvacCompatMapping = {
   sourceSku: string;
   sourceBrand?: string | null;
   sourceRefrigerant?: string | null;
+  sourceBtu?: number | null;
 };
 
 function normalizeCompare(value: string | null | undefined): string {
@@ -260,7 +261,14 @@ function isIndoorCompatibleWithOutdoor(
   const outdoorRef = normalizeCompare(outdoor.sourceRefrigerant);
 
   if (!indoorBrand || !outdoorBrand || !indoorRef || !outdoorRef) return false;
-  return indoorBrand === outdoorBrand && indoorRef === outdoorRef;
+  if (indoorBrand !== outdoorBrand || indoorRef !== outdoorRef) return false;
+
+  // Check BTU compatibility: indoor BTU must match one of the outdoor unit options
+  if (indoor.sourceBtu && outdoor.sourceBtu) {
+    return indoor.sourceBtu === outdoor.sourceBtu;
+  }
+
+  return true;
 }
 
 // ── Loader ─────────────────────────────────────────────────────────────────────
