@@ -1319,7 +1319,7 @@ export default function DiscountConfigRoute() {
                             options={[
                               { label: "— Select condenser —", value: "" },
                               ...outdoorMappingEntries.map((m) => ({
-                                label: `${m.sourceSku} — ${m.sourceBrand ?? ""} ${m.mappedProductTitle ?? ""}`,
+                                label: [m.sourceSku, m.sourceBrand, m.sourceRefrigerant].filter(Boolean).join(" — "),
                                 value: m.sourceSku,
                               })),
                             ]}
@@ -1394,7 +1394,7 @@ export default function DiscountConfigRoute() {
                               {compatibleIndoorMappings.map((m) => (
                                 <Checkbox
                                   key={m.sourceSku}
-                                  label={`${m.sourceSku} — ${m.sourceBrand ?? ""} ${m.sourceSystem ?? ""} ${m.sourceRefrigerant ?? ""} ${m.sourceBtu ? m.sourceBtu + " BTU" : ""}`}
+                                  label={[m.sourceSku, m.sourceBrand, m.sourceType, m.sourceSeries, m.sourceRefrigerant].filter(Boolean).join(" — ")}
                                   checked={rule.allowed_indoor_skus.includes(m.sourceSku)}
                                   onChange={(checked) =>
                                     setComboRules((p) =>
