@@ -276,6 +276,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       query ShopRuntimeConfig {
         shop {
           runtimeConfig: metafield(namespace: "smart_discount_engine", key: "config") { value }
+          hvacConfig: metafield(namespace: "smart_discount_engine", key: "hvac_config") { value }
         }
       }
     `),
@@ -308,12 +309,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const configData = await configRes.json();
   const shopData = configData?.data?.shop;
   const rawConfigValue = shopData?.runtimeConfig?.value ?? null;
+  const rawHvacConfigValue = shopData?.hvacConfig?.value ?? null;
 
   let config: RuntimeConfig;
   try {
     config = rawConfigValue ? JSON.parse(rawConfigValue) : DEFAULT_CONFIG;
   } catch {
     config = DEFAULT_CONFIG;
+  }
+
+  // Merge HVAC combo rules from the separate hvac_config metafield back into config for display.
+  if (rawHvacConfigValue) {
+    try {
+      const hvacOverlay = JSON.parse(rawHvacConfigValue);
+      if (Array.isArray(hvacOverlay?.combination_rules)) {
+        config.hvac_rule = { ...config.hvac_rule, combination_rules: hvacOverlay.combination_rules };
+      }
+    } catch { /* ignore parse errors */ }
   }
 
   // Separate indoor/outdoor mapped units
