@@ -153,72 +153,83 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       where: { shop, matchStatus: "unmapped" },
     });
 
+    if (unmapped.length === 0) {
+      return json({ ok: true, message: "No unmapped SKUs — nothing to process." });
+    }
+
     let matched = 0;
     let notFound = 0;
 
-    for (const row of unmapped) {
-      try {
-        const res = await admin.graphql(
-          `
-          #graphql
-          query FindBySku($query: String!) {
-            products(first: 5, query: $query) {
-              nodes {
-                id
-                title
-                handle
-                onlineStoreUrl
-                variants(first: 10) {
-                  nodes { id sku }
+    const GQL_BATCH = 8; // concurrent GraphQL calls at a time
+
+    for (let i = 0; i < unmapped.length; i += GQL_BATCH) {
+      const batch = unmapped.slice(i, i + GQL_BATCH);
+
+      // Run GraphQL lookups concurrently for this batch
+      const results = await Promise.all(
+        batch.map(async (row) => {
+          try {
+            const res = await admin.graphql(
+              `#graphql
+              query FindBySku($query: String!) {
+                products(first: 5, query: $query) {
+                  nodes {
+                    id title handle onlineStoreUrl
+                    variants(first: 10) { nodes { id sku } }
+                  }
+                }
+              }`,
+              { variables: { query: `sku:${row.sourceSku}` } },
+            );
+            const data = await res.json();
+            const products = data?.data?.products?.nodes ?? [];
+
+            for (const product of products) {
+              for (const variant of product.variants?.nodes ?? []) {
+                if ((variant.sku || "").trim().toUpperCase() === row.sourceSku.toUpperCase()) {
+                  return { id: row.id, found: true as const, product, variant };
                 }
               }
             }
-          }`,
-          { variables: { query: `sku:${row.sourceSku}` } },
-        );
-        const data = await res.json();
-        const products = data?.data?.products?.nodes ?? [];
-
-        let found = false;
-        for (const product of products) {
-          for (const variant of product.variants?.nodes ?? []) {
-            const vSku = (variant.sku || "").trim().toUpperCase();
-            if (vSku === row.sourceSku.toUpperCase()) {
-              await prisma.hvacSkuMapping.update({
-                where: { id: row.id },
-                data: {
-                  mappedProductId: product.id,
-                  mappedProductTitle: product.title,
-                  mappedProductHandle: product.handle,
-                  mappedProductUrl: product.onlineStoreUrl,
-                  mappedVariantId: variant.id,
-                  mappedVariantSku: variant.sku,
-                  matchStatus: "auto_exact",
-                },
-              });
-              matched++;
-              found = true;
-              break;
-            }
+            return { id: row.id, found: false as const };
+          } catch {
+            return { id: row.id, found: false as const };
           }
-          if (found) break;
-        }
+        }),
+      );
 
-        if (!found) {
-          await prisma.hvacSkuMapping.update({
-            where: { id: row.id },
+      // Batch all DB updates for this batch in a single transaction
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dbOps: any[] = results.map((r) => {
+        if (r.found) {
+          matched++;
+          return prisma.hvacSkuMapping.update({
+            where: { id: r.id },
+            data: {
+              mappedProductId: r.product.id,
+              mappedProductTitle: r.product.title,
+              mappedProductHandle: r.product.handle,
+              mappedProductUrl: r.product.onlineStoreUrl,
+              mappedVariantId: r.variant.id,
+              mappedVariantSku: r.variant.sku,
+              matchStatus: "auto_exact",
+            },
+          });
+        } else {
+          notFound++;
+          return prisma.hvacSkuMapping.update({
+            where: { id: r.id },
             data: { matchStatus: "not_found" },
           });
-          notFound++;
         }
-      } catch {
-        notFound++;
-      }
+      });
+
+      await prisma.$transaction(dbOps);
     }
 
     return json({
       ok: true,
-      message: `Auto-matched ${matched} products. ${notFound} not found.`,
+      message: `Auto-matched ${matched} products. ${notFound} not found in Shopify.`,
     });
   }
 
