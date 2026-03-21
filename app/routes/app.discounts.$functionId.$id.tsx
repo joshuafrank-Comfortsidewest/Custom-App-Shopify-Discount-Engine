@@ -132,8 +132,9 @@ type ActionResult = {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-// 45 KB per chunk so that JSON.stringify(fragment) stays well under Shopify's 65 535 B limit
-const CHUNK_SIZE = 45_000;
+// 120 KB per chunk – keeps the full config in a single metafield so
+// the Shopify Function can read it without needing chunk parts.
+const CHUNK_SIZE = 120_000;
 const MAX_PARTS = 6;
 
 const DEFAULT_ACTIVATION: SpendActivation = {
