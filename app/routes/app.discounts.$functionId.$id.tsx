@@ -297,16 +297,17 @@ function isIndoorCompatibleWithOutdoor(
   if (!indoorBrand || !outdoorBrand || !indoorRef || !outdoorRef) return false;
   if (indoorBrand !== outdoorBrand || indoorRef !== outdoorRef) return false;
 
-  // Check BTU compatibility via the combinations table:
-  // The indoor unit's BTU must appear in the valid zone BTUs for this condenser.
+  // Check BTU compatibility via the combinations table.
+  // Look up all valid indoor zone BTU values for this specific condenser SKU.
   const outdoorSkuKey = normalizeCompare(outdoor.sourceSku);
   const validBtus = condenserValidBtus.get(outdoorSkuKey);
-  if (validBtus && validBtus.size > 0) {
-    if (!indoor.sourceBtu) return false;
+  if (validBtus && validBtus.size > 0 && indoor.sourceBtu) {
+    // We have both the combinations data and the indoor BTU — do the proper check.
     return validBtus.has(indoor.sourceBtu);
   }
 
-  // If no combinations data found for this condenser, fall back to brand+refrigerant match only
+  // Fallback: no combinations data for this condenser, or indoor BTU not stored yet.
+  // Match on brand + refrigerant only so units still appear.
   return true;
 }
 
@@ -1453,7 +1454,7 @@ export default function DiscountConfigRoute() {
                               {compatibleIndoorMappings.map((m) => (
                                 <Checkbox
                                   key={m.sourceSku}
-                                  label={[m.sourceSku, m.sourceBrand, m.sourceType, m.sourceSeries, m.sourceRefrigerant].filter(Boolean).join(" — ")}
+                                  label={[m.sourceBrand, m.sourceSeries, m.sourceSystem, m.sourceBtu ? `${m.sourceBtu} BTU` : null, m.sourceRefrigerant].filter(Boolean).join(" - ")}
                                   checked={rule.allowed_indoor_skus.includes(m.sourceSku)}
                                   onChange={(checked) =>
                                     setComboRules((p) =>
