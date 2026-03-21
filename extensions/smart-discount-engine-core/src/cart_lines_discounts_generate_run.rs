@@ -203,7 +203,7 @@ fn cart_lines_discounts_generate_run(
     let runtime_config_json =
         resolve_runtime_config_json(runtime_config_primary.as_deref(), &runtime_config_chunks);
 
-    eprintln!("[SDE] primary_exists={} chunk_exists=[{},{},{},{},{},{}] resolved_len={}",
+    log!("[SDE] primary_exists={} chunk_exists=[{},{},{},{},{},{}] resolved_len={}",
         runtime_config_primary.is_some(),
         runtime_config_chunks[0].is_some(),
         runtime_config_chunks[1].is_some(),
@@ -216,20 +216,20 @@ fn cart_lines_discounts_generate_run(
 
     let config = parse_runtime_config(runtime_config_json.as_deref()).unwrap_or_default();
 
-    eprintln!("[SDE] toggles: first={} bulk={} vip={} item={} hvac={}",
+    log!("[SDE] toggles: first={} bulk={} vip={} item={} hvac={}",
         config.toggles.first_order_enabled,
         config.toggles.bulk_enabled,
         config.toggles.vip_enabled,
         config.toggles.item_collection_enabled,
         config.toggles.hvac_enabled,
     );
-    eprintln!("[SDE] bulk_tiers: {}={:.1}% {}={:.1}% {}={:.1}% {}={:.1}%",
+    log!("[SDE] bulk_tiers: {}={:.1}% {}={:.1}% {}={:.1}% {}={:.1}%",
         config.bulk5_min, config.bulk5_percent,
         config.bulk10_min, config.bulk10_percent,
         config.bulk13_min, config.bulk13_percent,
         config.bulk15_min, config.bulk15_percent,
     );
-    eprintln!("[SDE] item_rules={} first_pct={:.1}",
+    log!("[SDE] item_rules={} first_pct={:.1}",
         config.item_collection_rules.len(),
         config.first_order_percent,
     );
@@ -244,7 +244,7 @@ fn cart_lines_discounts_generate_run(
         .map(|line| line.cost().subtotal_amount().amount().0)
         .sum();
 
-    eprintln!("[SDE] cart_subtotal={:.2} lines={} item_map_size={} bulk_pct={:.1}",
+    log!("[SDE] cart_subtotal={:.2} lines={} item_map_size={} bulk_pct={:.1}",
         cart_subtotal,
         input.cart().lines().len(),
         item_percents_by_product.len(),
@@ -282,7 +282,7 @@ fn cart_lines_discounts_generate_run(
             .max(vip_percent)
             .max(0.0);
 
-        eprintln!("[SDE] line pid={} qty={} subtotal={:.2} item%={:.1} bulk%={:.1} first%={:.1} vip%={:.1} base%={:.1}",
+        log!("[SDE] line pid={} qty={} subtotal={:.2} item%={:.1} bulk%={:.1} first%={:.1} vip%={:.1} base%={:.1}",
             product_id, line_qty, line_subtotal, item_percent, bulk_percent, first_order_percent, vip_percent, base_percent,
         );
 
@@ -437,7 +437,7 @@ fn cart_lines_discounts_generate_run(
         }
     }
 
-    eprintln!("[SDE] candidates={}", candidates.len());
+    log!("[SDE] candidates={}", candidates.len());
 
     if candidates.is_empty() {
         return Ok(schema::CartLinesDiscountsGenerateRunResult { operations: vec![] });
