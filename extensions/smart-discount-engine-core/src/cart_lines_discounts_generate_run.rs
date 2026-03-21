@@ -515,7 +515,15 @@ fn cart_lines_discounts_generate_run(
         }
 
         if base_percent_candidate > 0.0 && non_hvac_percent_qty > 0 {
-            let message = match discount_source.as_str() {
+            // If item_percent drove this line's discount (higher than all customer discounts),
+            // show "Current promotion"; otherwise use the customer discount source label.
+            let customer_best = vip_percent.max(first_order_percent).max(bulk_percent);
+            let line_source = if item_percent > customer_best + 0.001 {
+                "current_promotion"
+            } else {
+                discount_source.as_str()
+            };
+            let message = match line_source {
                 "vip" => format!("Best {}% (VIP discount)", fmt_amount(base_percent_candidate)),
                 "first_order" => format!("Best {}% (First Order)", fmt_amount(base_percent_candidate)),
                 "bulk" => format!("Best {}% (Bulk discount)", fmt_amount(base_percent_candidate)),
@@ -851,19 +859,20 @@ fn determine_discount_source(
     vip_percent: f64,
     bulk_percent: f64,
 ) -> String {
-    // VIP takes precedence if available
-    if vip_percent > 0.0 && (vip_percent - first_order_percent.max(bulk_percent)).abs() < 0.001 {
+    let best = vip_percent.max(first_order_percent).max(bulk_percent);
+    if best <= 0.0 {
+        return "current_promotion".to_string();
+    }
+    // Whichever is highest wins; VIP beats ties, then first order, then bulk
+    if vip_percent > 0.0 && vip_percent >= best - 0.001 {
         return "vip".to_string();
     }
-    // First order takes precedence over bulk
-    if first_order_percent > 0.0 && (first_order_percent - bulk_percent).abs() < 0.001 {
+    if first_order_percent > 0.0 && first_order_percent >= best - 0.001 {
         return "first_order".to_string();
     }
-    // Bulk
     if bulk_percent > 0.0 {
         return "bulk".to_string();
     }
-    // Default
     "current_promotion".to_string()
 }
 

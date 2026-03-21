@@ -22,6 +22,7 @@ import {
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import unitsData from "../data/hvac/units.json";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -243,6 +244,39 @@ type HvacCompatMapping = {
   sourceBtu?: number | null;
 };
 
+type CombinationEntry = {
+  Brand: string;
+  Refrigerant: string;
+  Condenser: string;
+  "Unit 1": string;
+  "Unit 2": string;
+  "Unit 3": string;
+  "Unit 4": string;
+  "Unit 5": string;
+  "Unit 6": string;
+  [key: string]: string;
+};
+
+// Build a lookup: condenser SKU (uppercase) → Set of valid indoor BTU values (as numbers)
+const condenserValidBtus = (() => {
+  const map = new Map<string, Set<number>>();
+  const combinations = (unitsData as any).combinations as CombinationEntry[];
+  for (const combo of combinations ?? []) {
+    const condenserKey = String(combo.Condenser ?? "").trim().toUpperCase();
+    if (!condenserKey) continue;
+    if (!map.has(condenserKey)) map.set(condenserKey, new Set());
+    const btus = map.get(condenserKey)!;
+    for (const field of ["Unit 1", "Unit 2", "Unit 3", "Unit 4", "Unit 5", "Unit 6"]) {
+      const val = String(combo[field] ?? "").trim();
+      if (val) {
+        const n = parseInt(val, 10);
+        if (!isNaN(n) && n > 0) btus.add(n);
+      }
+    }
+  }
+  return map;
+})();
+
 function normalizeCompare(value: string | null | undefined): string {
   return String(value ?? "").trim().toUpperCase();
 }
@@ -263,11 +297,16 @@ function isIndoorCompatibleWithOutdoor(
   if (!indoorBrand || !outdoorBrand || !indoorRef || !outdoorRef) return false;
   if (indoorBrand !== outdoorBrand || indoorRef !== outdoorRef) return false;
 
-  // Check BTU compatibility: indoor BTU must match one of the outdoor unit options
-  if (indoor.sourceBtu && outdoor.sourceBtu) {
-    return indoor.sourceBtu === outdoor.sourceBtu;
+  // Check BTU compatibility via the combinations table:
+  // The indoor unit's BTU must appear in the valid zone BTUs for this condenser.
+  const outdoorSkuKey = normalizeCompare(outdoor.sourceSku);
+  const validBtus = condenserValidBtus.get(outdoorSkuKey);
+  if (validBtus && validBtus.size > 0) {
+    if (!indoor.sourceBtu) return false;
+    return validBtus.has(indoor.sourceBtu);
   }
 
+  // If no combinations data found for this condenser, fall back to brand+refrigerant match only
   return true;
 }
 
