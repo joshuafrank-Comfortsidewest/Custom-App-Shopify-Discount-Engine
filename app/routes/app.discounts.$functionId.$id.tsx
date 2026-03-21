@@ -389,21 +389,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     admin.graphql(`
       #graphql
       query ActiveDiscounts {
-        discountNodes(first: 50, query: "status:active") {
+        automaticDiscountNodes(first: 50) {
           nodes {
             id
-            discount {
+            automaticDiscount {
               __typename
               ... on DiscountAutomaticApp {
                 title
                 status
-                appDiscountType { title functionId }
+              }
+              ... on DiscountAutomaticBasic {
+                title
+                status
               }
             }
           }
         }
       }
-    `).then((r: any) => r.json()).catch(() => null),
+    `).then((r: any) => r.json()).catch((e: any) => {
+      console.error("[diagnostics] discount query failed:", e?.message ?? e);
+      return null;
+    }),
   ]);
 
   const configData = await configRes.json();
@@ -452,14 +458,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }));
 
   // Extract active discount info for diagnostics
-  const discountNodes = discountRes?.data?.discountNodes?.nodes ?? [];
+  const discountNodes = discountRes?.data?.automaticDiscountNodes?.nodes ?? [];
   const activeAppDiscounts = discountNodes
-    .filter((n: any) => n?.discount?.__typename === "DiscountAutomaticApp")
+    .filter((n: any) => {
+      const d = n?.automaticDiscount;
+      return d?.__typename === "DiscountAutomaticApp" && d?.status === "ACTIVE";
+    })
     .map((n: any) => ({
       id: n.id,
-      title: n.discount.title ?? "Untitled",
-      status: n.discount.status ?? "unknown",
-      functionId: n.discount.appDiscountType?.functionId ?? null,
+      title: n.automaticDiscount.title ?? "Untitled",
+      status: n.automaticDiscount.status ?? "unknown",
     }));
 
   // Raw metafield diagnostic: show what the Rust function would parse
@@ -1638,7 +1646,7 @@ export default function DiscountConfigRoute() {
                         {diagnostics.activeAppDiscounts.map((d: any, i: number) => (
                           <List.Item key={i}>
                             <Badge tone="success">ACTIVE</Badge>{" "}
-                            {d.title} — Function: {d.functionId ?? "unknown"}
+                            {d.title}
                           </List.Item>
                         ))}
                       </List>
