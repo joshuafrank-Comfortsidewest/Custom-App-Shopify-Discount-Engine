@@ -132,6 +132,7 @@ type ActionResult = {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const METAFIELD_BATCH_SIZE = 25; // Shopify metafieldsSet limit per call
+const CONCURRENT_BATCH_GROUPS = 6; // 6 concurrent x 25 = 150 products at once
 
 const DEFAULT_ACTIVATION: SpendActivation = {
   mode: "always",
@@ -593,35 +594,118 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   const productEntries = Array.from(productPercentMap.entries());
-  let metafieldWriteCount = 0;
-  for (let i = 0; i < productEntries.length; i += METAFIELD_BATCH_SIZE) {
-    const batch = productEntries.slice(i, i + METAFIELD_BATCH_SIZE);
-    const metafields = batch.map(([pid, pct]) => ({
-      ownerId: `gid://shopify/Product/${pid}`,
-      namespace: "smart_discount_engine",
-      key: "discount_percent",
-      type: "number_decimal",
-      value: String(pct),
-    }));
+  const currentProductIdSet = new Set(productPercentMap.keys());
 
-    try {
-      const batchRes = await admin.graphql(
-        `
-        #graphql
-        mutation SetProductDiscountPercent($metafields: [MetafieldsSetInput!]!) {
-          metafieldsSet(metafields: $metafields) {
-            userErrors { field message }
+  // ── Stale metafield cleanup ─────────────────────────────────────────────────
+  // Query all products that currently have a discount_percent metafield set,
+  // then zero out any that are no longer in any active collection rule.
+  {
+    let staleCursor: string | null = null;
+    const staleIds: string[] = [];
+    do {
+      const staleRes = await admin.graphql(
+        `#graphql
+        query StaleDiscountProducts($cursor: String) {
+          products(first: 250, after: $cursor, query: "metafields_namespace_and_key:smart_discount_engine.discount_percent") {
+            pageInfo { hasNextPage endCursor }
+            nodes {
+              id
+              discountPercent: metafield(namespace: "smart_discount_engine", key: "discount_percent") { value }
+            }
           }
         }`,
-        { variables: { metafields } },
+        { variables: { cursor: staleCursor } },
       );
-      const batchData = await batchRes.json();
-      for (const e of batchData?.data?.metafieldsSet?.userErrors ?? []) {
-        errors.push(`Product metafield: ${e?.message ?? "Unknown error"}`);
+      const staleData = await staleRes.json();
+      const nodes = staleData?.data?.products?.nodes ?? [];
+      for (const node of nodes) {
+        const rawId = (node.id as string).replace("gid://shopify/Product/", "");
+        const hasDiscount = Number(node.discountPercent?.value ?? 0) > 0;
+        if (hasDiscount && !currentProductIdSet.has(rawId)) {
+          staleIds.push(node.id as string);
+        }
       }
-      metafieldWriteCount += batch.length;
-    } catch (err) {
-      errors.push(`Product metafield batch error: ${err instanceof Error ? err.message : String(err)}`);
+      const pageInfo = staleData?.data?.products?.pageInfo;
+      staleCursor = pageInfo?.hasNextPage ? pageInfo.endCursor : null;
+    } while (staleCursor);
+
+    // Zero out stale products in parallel batches
+    if (staleIds.length > 0) {
+      productCounts.push({ label: "Stale metafields cleared", count: staleIds.length });
+      const staleBatches: string[][] = [];
+      for (let i = 0; i < staleIds.length; i += METAFIELD_BATCH_SIZE) {
+        staleBatches.push(staleIds.slice(i, i + METAFIELD_BATCH_SIZE));
+      }
+      for (let g = 0; g < staleBatches.length; g += CONCURRENT_BATCH_GROUPS) {
+        await Promise.all(
+          staleBatches.slice(g, g + CONCURRENT_BATCH_GROUPS).map(async (batch) => {
+            const metafields = batch.map((pid) => ({
+              ownerId: pid,
+              namespace: "smart_discount_engine",
+              key: "discount_percent",
+              type: "number_decimal",
+              value: "0",
+            }));
+            try {
+              await admin.graphql(
+                `#graphql
+                mutation ClearStaleDiscountPercent($metafields: [MetafieldsSetInput!]!) {
+                  metafieldsSet(metafields: $metafields) {
+                    userErrors { field message }
+                  }
+                }`,
+                { variables: { metafields } },
+              );
+            } catch (_) { /* best-effort */ }
+          }),
+        );
+      }
+    }
+  }
+
+  // ── Write current discount_percent metafields in parallel ───────────────────
+  const allBatches: Array<Array<[string, number]>> = [];
+  for (let i = 0; i < productEntries.length; i += METAFIELD_BATCH_SIZE) {
+    allBatches.push(productEntries.slice(i, i + METAFIELD_BATCH_SIZE));
+  }
+
+  let metafieldWriteCount = 0;
+  for (let g = 0; g < allBatches.length; g += CONCURRENT_BATCH_GROUPS) {
+    const groupResults = await Promise.all(
+      allBatches.slice(g, g + CONCURRENT_BATCH_GROUPS).map(async (batch) => {
+        const metafields = batch.map(([pid, pct]) => ({
+          ownerId: `gid://shopify/Product/${pid}`,
+          namespace: "smart_discount_engine",
+          key: "discount_percent",
+          type: "number_decimal",
+          value: String(pct),
+        }));
+        try {
+          const batchRes = await admin.graphql(
+            `#graphql
+            mutation SetProductDiscountPercent($metafields: [MetafieldsSetInput!]!) {
+              metafieldsSet(metafields: $metafields) {
+                userErrors { field message }
+              }
+            }`,
+            { variables: { metafields } },
+          );
+          const batchData = await batchRes.json();
+          const batchErrors: string[] = (batchData?.data?.metafieldsSet?.userErrors ?? []).map(
+            (e: any) => `Product metafield: ${e?.message ?? "Unknown error"}`,
+          );
+          return { count: batch.length, errors: batchErrors };
+        } catch (err) {
+          return {
+            count: 0,
+            errors: [`Product metafield batch error: ${err instanceof Error ? err.message : String(err)}`],
+          };
+        }
+      }),
+    );
+    for (const result of groupResults) {
+      metafieldWriteCount += result.count;
+      for (const e of result.errors) errors.push(e);
     }
   }
 
