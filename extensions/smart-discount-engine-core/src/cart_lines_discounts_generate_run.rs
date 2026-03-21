@@ -202,7 +202,37 @@ fn cart_lines_discounts_generate_run(
 
     let runtime_config_json =
         resolve_runtime_config_json(runtime_config_primary.as_deref(), &runtime_config_chunks);
+
+    eprintln!("[SDE] primary_exists={} chunk_exists=[{},{},{},{},{},{}] resolved_len={}",
+        runtime_config_primary.is_some(),
+        runtime_config_chunks[0].is_some(),
+        runtime_config_chunks[1].is_some(),
+        runtime_config_chunks[2].is_some(),
+        runtime_config_chunks[3].is_some(),
+        runtime_config_chunks[4].is_some(),
+        runtime_config_chunks[5].is_some(),
+        runtime_config_json.as_ref().map(|s| s.len()).unwrap_or(0),
+    );
+
     let config = parse_runtime_config(runtime_config_json.as_deref()).unwrap_or_default();
+
+    eprintln!("[SDE] toggles: first={} bulk={} vip={} item={} hvac={}",
+        config.toggles.first_order_enabled,
+        config.toggles.bulk_enabled,
+        config.toggles.vip_enabled,
+        config.toggles.item_collection_enabled,
+        config.toggles.hvac_enabled,
+    );
+    eprintln!("[SDE] bulk_tiers: {}={:.1}% {}={:.1}% {}={:.1}% {}={:.1}%",
+        config.bulk5_min, config.bulk5_percent,
+        config.bulk10_min, config.bulk10_percent,
+        config.bulk13_min, config.bulk13_percent,
+        config.bulk15_min, config.bulk15_percent,
+    );
+    eprintln!("[SDE] item_rules={} first_pct={:.1}",
+        config.item_collection_rules.len(),
+        config.first_order_percent,
+    );
 
     let (first_order_percent, vip_percent) = compute_customer_percents(&input, &config);
     let item_percents_by_product = build_product_item_percents(&config);
@@ -213,6 +243,13 @@ fn cart_lines_discounts_generate_run(
         .iter()
         .map(|line| line.cost().subtotal_amount().amount().0)
         .sum();
+
+    eprintln!("[SDE] cart_subtotal={:.2} lines={} item_map_size={} bulk_pct={:.1}",
+        cart_subtotal,
+        input.cart().lines().len(),
+        item_percents_by_product.len(),
+        compute_bulk_percent(&config, cart_subtotal),
+    );
 
     let mut candidates: Vec<schema::ProductDiscountCandidate> = vec![];
 
@@ -244,6 +281,10 @@ fn cart_lines_discounts_generate_run(
             .max(first_order_percent)
             .max(vip_percent)
             .max(0.0);
+
+        eprintln!("[SDE] line pid={} qty={} subtotal={:.2} item%={:.1} bulk%={:.1} first%={:.1} vip%={:.1} base%={:.1}",
+            product_id, line_qty, line_subtotal, item_percent, bulk_percent, first_order_percent, vip_percent, base_percent,
+        );
 
         let mut hvac_fixed_stackable_qty: i32 = 0;
         let mut hvac_fixed_stackable_amount_total: f64 = 0.0;
@@ -395,6 +436,8 @@ fn cart_lines_discounts_generate_run(
             });
         }
     }
+
+    eprintln!("[SDE] candidates={}", candidates.len());
 
     if candidates.is_empty() {
         return Ok(schema::CartLinesDiscountsGenerateRunResult { operations: vec![] });
