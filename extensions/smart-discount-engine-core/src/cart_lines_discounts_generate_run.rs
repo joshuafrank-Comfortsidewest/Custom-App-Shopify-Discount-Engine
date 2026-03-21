@@ -118,6 +118,45 @@ impl Default for HvacConfigOverlay {
 
 #[derive(Debug, Deserialize)]
 #[serde(default)]
+struct SpendActivation {
+    mode: String, // "always" | "requires_any"
+    required_any: Vec<String>, // ["bulk", "vip", "first"]
+}
+
+impl Default for SpendActivation {
+    fn default() -> Self {
+        Self { mode: "always".to_string(), required_any: vec![] }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+struct CollectionSpendRule {
+    enabled: bool,
+    amount_off_per_step: f64,
+    min_collection_qty: i32,
+    spend_step_amount: f64,
+    max_discounted_units_per_order: i32,
+    product_ids: Vec<String>,
+    activation: SpendActivation,
+}
+
+impl Default for CollectionSpendRule {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            amount_off_per_step: 0.0,
+            min_collection_qty: 1,
+            spend_step_amount: 0.0,
+            max_discounted_units_per_order: 0,
+            product_ids: vec![],
+            activation: SpendActivation::default(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
 struct RuntimeConfig {
     toggles: DiscountToggles,
     first_order_percent: f64,
@@ -130,6 +169,7 @@ struct RuntimeConfig {
     bulk13_percent: f64,
     bulk15_percent: f64,
     hvac_rule: HvacRuleConfig,
+    collection_spend_rule: CollectionSpendRule,
 }
 
 impl Default for RuntimeConfig {
@@ -146,6 +186,7 @@ impl Default for RuntimeConfig {
             bulk13_percent: 0.0,
             bulk15_percent: 0.0,
             hvac_rule: HvacRuleConfig::default(),
+            collection_spend_rule: CollectionSpendRule::default(),
         }
     }
 }
@@ -415,6 +456,86 @@ fn cart_lines_discounts_generate_run(
                 }),
                 associated_discount_code: None,
             });
+        }
+    }
+
+    // ── Collection spend rule ─────────────────────────────────────────────────
+    let spend = &config.collection_spend_rule;
+    if config.toggles.collection_spend_enabled
+        && spend.enabled
+        && spend.amount_off_per_step > 0.0
+        && spend.spend_step_amount > 0.0
+        && !spend.product_ids.is_empty()
+    {
+        let activation_ok = match spend.activation.mode.as_str() {
+            "requires_any" => spend.activation.required_any.iter().any(|req| match req.as_str() {
+                "bulk" => bulk_percent > 0.0,
+                "vip" => vip_percent > 0.0,
+                "first" => first_order_percent > 0.0,
+                _ => false,
+            }),
+            _ => true, // "always" or unknown
+        };
+
+        if activation_ok {
+            let spend_ids: std::collections::HashSet<String> =
+                spend.product_ids.iter().cloned().collect();
+
+            // Collect eligible lines and total qty
+            struct SpendLine { line_id: String, qty: i32, unit_price: f64 }
+            let mut eligible: Vec<SpendLine> = vec![];
+            let mut total_eligible_qty: i32 = 0;
+
+            for line in input.cart().lines().iter() {
+                if let Merchandise::ProductVariant(variant) = line.merchandise() {
+                    let pid = normalize_product_id(variant.product().id());
+                    if spend_ids.contains(&pid) {
+                        let qty = *line.quantity();
+                        if qty > 0 {
+                            let unit_price = line.cost().subtotal_amount().amount().0 / (qty as f64);
+                            total_eligible_qty += qty;
+                            eligible.push(SpendLine { line_id: line.id().to_string(), qty, unit_price });
+                        }
+                    }
+                }
+            }
+
+            let min_qty = spend.min_collection_qty.max(1);
+            if total_eligible_qty >= min_qty && cart_subtotal >= spend.spend_step_amount {
+                let steps = (cart_subtotal / spend.spend_step_amount).floor() as i32;
+                let mut units_to_discount = steps.min(total_eligible_qty);
+                if spend.max_discounted_units_per_order > 0 {
+                    units_to_discount = units_to_discount.min(spend.max_discounted_units_per_order);
+                }
+
+                if units_to_discount > 0 {
+                    // Allocate to highest-priced eligible lines first
+                    eligible.sort_by(|a, b| b.unit_price.partial_cmp(&a.unit_price).unwrap_or(std::cmp::Ordering::Equal));
+                    let mut remaining = units_to_discount;
+                    for sl in &eligible {
+                        if remaining <= 0 { break; }
+                        let take = remaining.min(sl.qty);
+                        let discount = spend.amount_off_per_step.min(sl.unit_price).max(0.0);
+                        if discount > 0.0 {
+                            candidates.push(schema::ProductDiscountCandidate {
+                                targets: vec![schema::ProductDiscountCandidateTarget::CartLine(
+                                    schema::CartLineTarget { id: sl.line_id.clone(), quantity: Some(take) },
+                                )],
+                                message: Some(format!("${} off (Spend discount)", fmt_amount(discount))),
+                                value: schema::ProductDiscountCandidateValue::FixedAmount(
+                                    schema::ProductDiscountCandidateFixedAmount {
+                                        amount: Decimal(discount),
+                                        applies_to_each_item: Some(true),
+                                    },
+                                ),
+                                associated_discount_code: None,
+                            });
+                        }
+                        remaining -= take;
+                    }
+                    log!("[SDE] spend: total_eligible={} steps={} units_discounted={}", total_eligible_qty, steps, units_to_discount);
+                }
+            }
         }
     }
 
