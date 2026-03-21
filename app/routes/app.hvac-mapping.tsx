@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
+import { Form, useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -403,32 +403,32 @@ export default function HvacMappingRoute() {
                     Step 2: Auto-match SKUs to your Shopify products.
                   </Text>
                   <InlineStack gap="300" wrap>
-                    <form method="post">
+                    <Form method="post">
                       <input type="hidden" name="intent" value="import_catalog" />
                       <Button submit loading={isSubmitting} variant="primary">
                         Import Catalog from units.json
                       </Button>
-                    </form>
-                    <form method="post">
+                    </Form>
+                    <Form method="post">
                       <input type="hidden" name="intent" value="auto_match" />
                       <Button submit loading={isSubmitting}>
                         Auto-Match SKUs to Shopify
                       </Button>
-                    </form>
-                    <form method="post">
+                    </Form>
+                    <Form method="post">
                       <input type="hidden" name="intent" value="reset_not_found" />
                       <Button submit loading={isSubmitting} variant="plain">
                         Reset Not-Found → Unmapped
                       </Button>
-                    </form>
+                    </Form>
                   </InlineStack>
                   <Divider />
-                  <form method="post">
+                  <Form method="post">
                     <input type="hidden" name="intent" value="clear_all" />
                     <Button submit loading={isSubmitting} variant="plain" tone="critical">
                       Clear All Mappings
                     </Button>
-                  </form>
+                  </Form>
                 </BlockStack>
               </Card>
             </BlockStack>
@@ -478,7 +478,7 @@ export default function HvacMappingRoute() {
                   Enter the mapping ID (from the database) and the Shopify Product ID to manually
                   link a SKU to a product. Use this for SKUs that auto-match didn't find.
                 </Text>
-                <form method="post">
+                <Form method="post">
                   <input type="hidden" name="intent" value="manual_map" />
                   <BlockStack gap="300">
                     <TextField
@@ -500,7 +500,7 @@ export default function HvacMappingRoute() {
                       Map Product
                     </Button>
                   </BlockStack>
-                </form>
+                </Form>
               </BlockStack>
             </Card>
           </Layout.Section>
