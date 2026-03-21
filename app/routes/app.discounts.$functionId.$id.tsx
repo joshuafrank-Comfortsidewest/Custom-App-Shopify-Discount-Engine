@@ -132,9 +132,9 @@ type ActionResult = {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-// 120 KB per chunk – keeps the full config in a single metafield so
-// the Shopify Function can read it without needing chunk parts.
-const CHUNK_SIZE = 120_000;
+// 25 KB per chunk – keeps each metafield value small enough for Shopify
+// Function input. Stale parts are cleared to "" on every save.
+const CHUNK_SIZE = 25_000;
 const MAX_PARTS = 6;
 
 const DEFAULT_ACTIVATION: SpendActivation = {
