@@ -230,7 +230,7 @@ async function fetchAllProductIds(admin: any, collectionId: string): Promise<str
     const block = data?.data?.collection?.products;
     if (!block) break;
     for (const node of block.nodes ?? []) {
-      if (node?.id) ids.push(String(node.id));
+      if (node?.id) ids.push(stripGid(String(node.id)));
     }
     if (!block.pageInfo?.hasNextPage) break;
     after = block.pageInfo.endCursor ?? null;
@@ -319,6 +319,10 @@ type HvacCompatMapping = {
 
 function normalizeCompare(value: string | null | undefined): string {
   return String(value ?? "").trim().toUpperCase();
+}
+
+function stripGid(gid: string): string {
+  return gid.replace("gid://shopify/Product/", "");
 }
 
 function isIndoorCompatibleWithOutdoor(
@@ -566,14 +570,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     ...new Set(
       allHvacMappings
         .filter((m) => m.sourceType === "indoor" && m.mappedProductId)
-        .map((m) => m.mappedProductId as string),
+        .map((m) => stripGid(m.mappedProductId as string)),
     ),
   ];
   const outdoorIds: string[] = [
     ...new Set(
       allHvacMappings
         .filter((m) => m.sourceType === "outdoor" && m.mappedProductId)
-        .map((m) => m.mappedProductId as string),
+        .map((m) => stripGid(m.mappedProductId as string)),
     ),
   ];
 
@@ -587,7 +591,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   for (const m of allHvacMappings) {
     if (m.mappedProductId) {
       const skuKey = normalizeCompare(m.sourceSku);
-      skuToProductId.set(skuKey, m.mappedProductId);
+      skuToProductId.set(skuKey, stripGid(m.mappedProductId));
       if (m.sourceType === "indoor") indoorBySku.set(skuKey, m);
       if (m.sourceType === "outdoor") outdoorBySku.set(skuKey, m);
     }
