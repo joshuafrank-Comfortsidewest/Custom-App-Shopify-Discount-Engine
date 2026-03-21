@@ -54,7 +54,7 @@ type MappingRow = {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function classifySystem(system: string): "indoor" | "outdoor" {
-  return system.toLowerCase().includes("outdoor") ? "outdoor" : "indoor";
+  return String(system ?? "").toLowerCase().includes("outdoor") ? "outdoor" : "indoor";
 }
 
 const allUnits = (unitsData as any).indoorMapping as UnitEntry[];
@@ -95,16 +95,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   // ── Import from units.json ──
   if (intent === "import_catalog") {
-    let created = 0;
-    let skipped = 0;
+    // Deduplicate by SKU — keep the first occurrence so we don't build duplicate ops.
+    const seenSkus = new Set<string>();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ops: any[] = [];
 
     for (const unit of allUnits) {
       const sku = (unit.SKU || "").trim();
-      if (!sku) continue;
+      if (!sku || seenSkus.has(sku)) continue;
+      seenSkus.add(sku);
 
       const sourceType = classifySystem(unit.System);
-      try {
-        await prisma.hvacSkuMapping.upsert({
+      // Parse BTU — some entries are comma-separated ("6000, 9000"); store first value.
+      const btuRaw = String(unit.BTU ?? "").split(",")[0].trim();
+      const sourceBtu = btuRaw ? parseInt(btuRaw, 10) || null : null;
+
+      ops.push(
+        prisma.hvacSkuMapping.upsert({
           where: { shop_sourceSku: { shop, sourceSku: sku } },
           create: {
             shop,
@@ -113,7 +120,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             sourceBrand: unit.Brand || null,
             sourceSeries: unit.Series || null,
             sourceSystem: unit.System || null,
-            sourceBtu: unit.BTU ? parseInt(unit.BTU, 10) || null : null,
+            sourceBtu,
             sourceRefrigerant: unit.Refrigerant || null,
             matchStatus: "unmapped",
           },
@@ -122,17 +129,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             sourceBrand: unit.Brand || null,
             sourceSeries: unit.Series || null,
             sourceSystem: unit.System || null,
-            sourceBtu: unit.BTU ? parseInt(unit.BTU, 10) || null : null,
+            sourceBtu,
             sourceRefrigerant: unit.Refrigerant || null,
           },
-        });
-        created++;
-      } catch {
-        skipped++;
-      }
+        }),
+      );
     }
 
-    return json({ ok: true, message: `Imported ${created} SKUs (${skipped} errors).` });
+    // Run all upserts in a single transaction — much faster than sequential awaits.
+    const BATCH = 100;
+    let done = 0;
+    for (let i = 0; i < ops.length; i += BATCH) {
+      await prisma.$transaction(ops.slice(i, i + BATCH));
+      done += Math.min(BATCH, ops.length - i);
+    }
+
+    return json({ ok: true, message: `Imported ${done} unique SKUs from catalog.` });
   }
 
   // ── Auto-match SKUs to Shopify products ──
