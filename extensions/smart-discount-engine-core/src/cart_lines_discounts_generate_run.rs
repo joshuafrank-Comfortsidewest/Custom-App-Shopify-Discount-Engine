@@ -491,10 +491,57 @@ fn cart_lines_discounts_generate_run(
         let hvac_fixed_qty_total = hvac_fixed_stackable_qty_capped + hvac_fixed_exclusive_qty_capped;
         let remaining_qty: i32 = (line_qty - hvac_fixed_qty_total).max(0);
         let hvac_percent_qty = remaining_qty.min(hvac_percent_units_requested.max(0));
-        // Spend-discounted units are excluded from the percentage candidate to avoid conflict.
-        let spend_qty_on_line = spend_qty_by_line.get(line.id()).copied().unwrap_or(0);
-        let non_hvac_percent_qty = (remaining_qty - hvac_percent_qty - spend_qty_on_line).max(0);
 
+        // Use line_id_key (String) for the spend lookup — avoids potential type mismatch
+        // if line.id() returns a non-str Shopify type that doesn't hash to the same key.
+        let spend_qty_on_line = spend_qty_by_line.get(line_id_key.as_str()).copied().unwrap_or(0);
+
+        // Per unit: choose the better discount between spend (fixed $) and percentage.
+        // Whichever saves more wins that unit; the other discount gets the remaining units.
+        let spend_per_unit = if spend_qty_on_line > 0 {
+            spend.amount_off_per_step.min(line_unit_price).max(0.0)
+        } else {
+            0.0
+        };
+        let percent_savings_per_unit = line_unit_price * (base_percent_candidate / 100.0);
+
+        // Spend wins → apply spend to allocated units, percentage to the rest.
+        // Percentage wins → add spend units back to the percentage pool.
+        let (effective_spend_qty, non_hvac_percent_qty) = if spend_qty_on_line > 0
+            && spend_per_unit >= percent_savings_per_unit
+        {
+            let non_pct = (remaining_qty - hvac_percent_qty - spend_qty_on_line).max(0);
+            (spend_qty_on_line, non_pct)
+        } else if spend_qty_on_line > 0 {
+            // Percentage is better: absorb spend-allocated units into percent pool
+            let non_pct = (remaining_qty - hvac_percent_qty).max(0);
+            (0, non_pct)
+        } else {
+            let non_pct = (remaining_qty - hvac_percent_qty).max(0);
+            (0, non_pct)
+        };
+
+        // ── Spend discount first (higher priority — generates its candidate before %) ─
+        if effective_spend_qty > 0 && spend_per_unit > 0.0 {
+            candidates.push(schema::ProductDiscountCandidate {
+                targets: vec![schema::ProductDiscountCandidateTarget::CartLine(
+                    schema::CartLineTarget {
+                        id: line.id().clone(),
+                        quantity: Some(effective_spend_qty),
+                    },
+                )],
+                message: Some(format!("${} off (Spend discount)", fmt_amount(spend_per_unit))),
+                value: schema::ProductDiscountCandidateValue::FixedAmount(
+                    schema::ProductDiscountCandidateFixedAmount {
+                        amount: Decimal(spend_per_unit),
+                        applies_to_each_item: Some(true),
+                    },
+                    ),
+                    associated_discount_code: None,
+                });
+        }
+
+        // ── HVAC percent candidate ─────────────────────────────────────────
         if hvac_percent_qty > 0 && hvac_percent_candidate > 0.0 {
             candidates.push(schema::ProductDiscountCandidate {
                 targets: vec![schema::ProductDiscountCandidateTarget::CartLine(
@@ -503,31 +550,29 @@ fn cart_lines_discounts_generate_run(
                         quantity: Some(hvac_percent_qty),
                     },
                 )],
-                message: Some(format!(
-                    "Best {}% (Bundle discount)",
-                    fmt_amount(hvac_percent_candidate)
-                )),
-                value: schema::ProductDiscountCandidateValue::Percentage(schema::Percentage {
-                    value: Decimal(hvac_percent_candidate),
-                }),
+                message: Some(format!("HVAC {}% off", fmt_amount(hvac_percent_candidate))),
+                value: schema::ProductDiscountCandidateValue::Percentage(
+                    schema::Percentage {
+                        value: Decimal(hvac_percent_candidate),
+                    },
+                ),
                 associated_discount_code: None,
             });
         }
 
-        if base_percent_candidate > 0.0 && non_hvac_percent_qty > 0 {
-            // If item_percent drove this line's discount (higher than all customer discounts),
-            // show "Current promotion"; otherwise use the customer discount source label.
+        // ── VIP / bulk / first-order / item percentage candidate ──────────
+        if non_hvac_percent_qty > 0 && base_percent_candidate > 0.0 {
             let customer_best = vip_percent.max(first_order_percent).max(bulk_percent);
             let line_source = if item_percent > customer_best + 0.001 {
-                "current_promotion"
+                "current_promotion".to_string()
             } else {
-                discount_source.as_str()
+                discount_source.clone()
             };
-            let message = match line_source {
-                "vip" => format!("Best {}% (VIP discount)", fmt_amount(base_percent_candidate)),
-                "first_order" => format!("Best {}% (First Order)", fmt_amount(base_percent_candidate)),
-                "bulk" => format!("Best {}% (Bulk discount)", fmt_amount(base_percent_candidate)),
-                _ => format!("Best {}% (Current promotion)", fmt_amount(base_percent_candidate)),
+            let label = match line_source.as_str() {
+                "vip" => format!("Best {:.0}% (VIP discount)", base_percent_candidate),
+                "first_order" => format!("Best {:.0}% (First Order)", base_percent_candidate),
+                "bulk" => format!("Best {:.0}% (Bulk discount)", base_percent_candidate),
+                _ => format!("Current Promotion {:.0}% off", base_percent_candidate),
             };
             candidates.push(schema::ProductDiscountCandidate {
                 targets: vec![schema::ProductDiscountCandidateTarget::CartLine(
@@ -536,36 +581,14 @@ fn cart_lines_discounts_generate_run(
                         quantity: Some(non_hvac_percent_qty),
                     },
                 )],
-                message: Some(message),
-                value: schema::ProductDiscountCandidateValue::Percentage(schema::Percentage {
-                    value: Decimal(base_percent_candidate),
-                }),
+                message: Some(label),
+                value: schema::ProductDiscountCandidateValue::Percentage(
+                    schema::Percentage {
+                        value: Decimal(base_percent_candidate),
+                    },
+                ),
                 associated_discount_code: None,
             });
-        }
-
-        // Spend discount for units allocated in the pre-loop phase.
-        // These units are already excluded from non_hvac_percent_qty — no conflict.
-        if spend_qty_on_line > 0 {
-            let discount = spend.amount_off_per_step.min(line_unit_price).max(0.0);
-            if discount > 0.0 {
-                candidates.push(schema::ProductDiscountCandidate {
-                    targets: vec![schema::ProductDiscountCandidateTarget::CartLine(
-                        schema::CartLineTarget {
-                            id: line.id().clone(),
-                            quantity: Some(spend_qty_on_line),
-                        },
-                    )],
-                    message: Some(format!("${} off (Spend discount)", fmt_amount(discount))),
-                    value: schema::ProductDiscountCandidateValue::FixedAmount(
-                        schema::ProductDiscountCandidateFixedAmount {
-                            amount: Decimal(discount),
-                            applies_to_each_item: Some(true),
-                        },
-                    ),
-                    associated_discount_code: None,
-                });
-            }
         }
     }
 
