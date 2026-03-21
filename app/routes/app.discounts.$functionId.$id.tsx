@@ -534,8 +534,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     collection_spend_rule,
   };
 
-  const configJson = JSON.stringify(fullConfig);
-  const configSize = Buffer.byteLength(configJson, "utf8");
+  const serializedConfig = JSON.stringify(fullConfig);
+  const configSize = Buffer.byteLength(serializedConfig, "utf8");
   productCounts.push({ label: "Config size (bytes)", count: configSize });
 
   // Get shop GID for shop-level metafields
@@ -571,7 +571,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             namespace: "smart_discount_engine",
             key: "config",
             type: "json",
-            value: configJson,
+            value: serializedConfig,
           },
         ],
       },
