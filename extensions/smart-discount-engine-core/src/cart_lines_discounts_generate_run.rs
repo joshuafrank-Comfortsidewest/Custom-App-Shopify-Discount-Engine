@@ -20,6 +20,8 @@ struct HvacActiveRule {
     percent_target_qty_by_line: HashMap<String, i32>,
     fixed_target_qty_by_line: HashMap<String, i32>,
     estimated_total_discount: f64,
+    /// Line IDs of the outdoor unit(s) this rule targets (used for per-condenser grouping).
+    outdoor_line_ids: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -842,6 +844,7 @@ fn active_hvac_rules(
         //      silently drop any stackable amount rule targeting the same condenser.
         //   2. outdoor units in fixed_target_qty_by_line are subtracted from remaining_qty,
         //      preventing the percentage from also applying to the condenser.
+        let outdoor_line_ids: Vec<String> = selected_outdoor_qty_by_line.keys().cloned().collect();
         let fixed_targets = if amount > 0.0 { selected_outdoor_qty_by_line } else { HashMap::new() };
 
         evaluated_rules.push(HvacActiveRule {
@@ -851,6 +854,7 @@ fn active_hvac_rules(
             percent_target_qty_by_line: percent_targets,
             fixed_target_qty_by_line: fixed_targets,
             estimated_total_discount,
+            outdoor_line_ids,
         });
     }
 
@@ -868,13 +872,28 @@ fn active_hvac_rules(
     );
 
     if !exclusive.is_empty() {
+        // Sort by descending discount so we always pick the best rule first.
         exclusive.sort_by(|a, b| {
             b.estimated_total_discount
                 .partial_cmp(&a.estimated_total_discount)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        if let Some(best) = exclusive.into_iter().next() {
-            active.push(best);
+        // Keep the best exclusive_best rule *per outdoor condenser*.
+        // Greedy: claim outdoor line IDs as we go; a rule is included if it
+        // covers at least one outdoor line not yet claimed by a better rule.
+        let mut claimed: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for rule in exclusive {
+            if rule.outdoor_line_ids.is_empty() {
+                // No outdoor tracking available — include it unconditionally.
+                active.push(rule);
+            } else if rule.outdoor_line_ids.iter().any(|lid| !claimed.contains(lid)) {
+                // At least one outdoor line is unclaimed — this rule wins for its condenser.
+                for lid in &rule.outdoor_line_ids {
+                    claimed.insert(lid.clone());
+                }
+                active.push(rule);
+            }
+            // Otherwise every outdoor line is already covered by a better rule — skip.
         }
     }
 
