@@ -20,8 +20,8 @@ struct HvacActiveRule {
     percent_target_qty_by_line: HashMap<String, i32>,
     fixed_target_qty_by_line: HashMap<String, i32>,
     estimated_total_discount: f64,
-    /// Line IDs of the outdoor unit(s) this rule targets (used for per-condenser grouping).
-    outdoor_line_ids: Vec<String>,
+    /// Outdoor product IDs (in cart) this rule targets — used for per-condenser exclusive_best grouping.
+    outdoor_product_ids: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -299,7 +299,8 @@ fn cart_lines_discounts_generate_run(
     );
 
     let (first_order_percent, vip_percent) = compute_customer_percents(&input, &config);
-    let hvac_active_rules = active_hvac_rules(&input, &config);
+    let (hvac_active_rules, outdoor_pids_with_stackable_fixed) =
+        active_hvac_rules(&input, &config);
     let cart_subtotal: f64 = input
         .cart()
         .lines()
@@ -553,7 +554,25 @@ fn cart_lines_discounts_generate_run(
 
         let hvac_fixed_qty_total = hvac_fixed_stackable_qty_capped + hvac_fixed_exclusive_qty_capped;
         let remaining_qty: i32 = (line_qty - hvac_fixed_qty_total).max(0);
-        let hvac_percent_qty = remaining_qty.min(hvac_percent_units_requested.max(0));
+        let raw_hvac_percent_qty = remaining_qty.min(hvac_percent_units_requested.max(0));
+
+        // Fix B: Outdoor units that are NOT part of a fixed bundle should not receive a
+        // standalone HVAC percent when a stackable fixed-amount rule exists for their product.
+        // Without this, an exclusive percent-only rule (e.g. Rule 26 with min=1) can leak
+        // 5% onto a second condenser unit that wasn't covered by the $237 stackable bundle.
+        let blocked_by_bundle_rule = outdoor_pids_with_stackable_fixed.contains(&product_id)
+            && hvac_fixed_qty_total == 0;
+
+        // Fix C: When bulk/VIP already provides the same or higher discount as HVAC percent,
+        // let those units flow to the non-HVAC block so they get the correct label
+        // ("Best 13% (Bulk discount)" instead of "HVAC 13% off").
+        let blocked_by_base_covers = hvac_percent_exclusive_best <= base_percent_candidate + 0.001;
+
+        let effective_hvac_percent_qty = if blocked_by_bundle_rule || blocked_by_base_covers {
+            0
+        } else {
+            raw_hvac_percent_qty
+        };
 
         // Use line_id_key (String) for the spend lookup — avoids potential type mismatch
         // if line.id() returns a non-str Shopify type that doesn't hash to the same key.
@@ -573,14 +592,14 @@ fn cart_lines_discounts_generate_run(
         let (effective_spend_qty, non_hvac_percent_qty) = if spend_qty_on_line > 0
             && spend_per_unit >= percent_savings_per_unit
         {
-            let non_pct = (remaining_qty - hvac_percent_qty - spend_qty_on_line).max(0);
+            let non_pct = (remaining_qty - effective_hvac_percent_qty - spend_qty_on_line).max(0);
             (spend_qty_on_line, non_pct)
         } else if spend_qty_on_line > 0 {
             // Percentage is better: absorb spend-allocated units into percent pool
-            let non_pct = (remaining_qty - hvac_percent_qty).max(0);
+            let non_pct = (remaining_qty - effective_hvac_percent_qty).max(0);
             (0, non_pct)
         } else {
-            let non_pct = (remaining_qty - hvac_percent_qty).max(0);
+            let non_pct = (remaining_qty - effective_hvac_percent_qty).max(0);
             (0, non_pct)
         };
 
@@ -605,18 +624,18 @@ fn cart_lines_discounts_generate_run(
         }
 
         // ── HVAC percent candidate ─────────────────────────────────────────
-        if hvac_percent_qty > 0 && hvac_percent_candidate > 0.0 {
+        if effective_hvac_percent_qty > 0 && hvac_percent_exclusive_best > 0.0 {
             candidates.push(schema::ProductDiscountCandidate {
                 targets: vec![schema::ProductDiscountCandidateTarget::CartLine(
                     schema::CartLineTarget {
                         id: line.id().clone(),
-                        quantity: Some(hvac_percent_qty),
+                        quantity: Some(effective_hvac_percent_qty),
                     },
                 )],
-                message: Some(format!("HVAC {}% off", fmt_amount(hvac_percent_candidate))),
+                message: Some(format!("HVAC {}% off", fmt_amount(hvac_percent_exclusive_best))),
                 value: schema::ProductDiscountCandidateValue::Percentage(
                     schema::Percentage {
-                        value: Decimal(hvac_percent_candidate),
+                        value: Decimal(hvac_percent_exclusive_best),
                     },
                 ),
                 associated_discount_code: None,
@@ -676,7 +695,7 @@ fn cart_lines_discounts_generate_run(
 fn active_hvac_rules(
     input: &schema::cart_lines_discounts_generate_run::Input,
     config: &RuntimeConfig,
-) -> Vec<HvacActiveRule> {
+) -> (Vec<HvacActiveRule>, std::collections::HashSet<String>) {
     let has_configured_hvac_rules = !config.hvac_rule.combination_rules.is_empty()
         || (!config.hvac_rule.outdoor_product_ids.is_empty()
             && !config.hvac_rule.indoor_product_ids.is_empty()
@@ -684,7 +703,7 @@ fn active_hvac_rules(
                 || config.hvac_rule.amount_off_outdoor_per_bundle > 0.0));
 
     if !config.hvac_rule.enabled && !config.toggles.hvac_enabled && !has_configured_hvac_rules {
-        return vec![];
+        return (vec![], std::collections::HashSet::new());
     }
 
     let mut lines_by_product: HashMap<String, Vec<LineUnit>> = HashMap::new();
@@ -738,6 +757,10 @@ fn active_hvac_rules(
         };
 
     let mut evaluated_rules: Vec<HvacActiveRule> = vec![];
+    // Outdoor product IDs that have at least one stackable rule with a fixed amount bundle.
+    // Used in the per-line loop to prevent HVAC percent from leaking to non-bundled units.
+    let mut outdoor_pids_with_stackable_fixed: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
 
     for rule in candidate_rules.iter() {
         if !rule.enabled {
@@ -844,8 +867,22 @@ fn active_hvac_rules(
         //      silently drop any stackable amount rule targeting the same condenser.
         //   2. outdoor units in fixed_target_qty_by_line are subtracted from remaining_qty,
         //      preventing the percentage from also applying to the condenser.
-        let outdoor_line_ids: Vec<String> = selected_outdoor_qty_by_line.keys().cloned().collect();
         let fixed_targets = if amount > 0.0 { selected_outdoor_qty_by_line } else { HashMap::new() };
+
+        // Collect the outdoor product IDs (in cart) for this rule.
+        // Used for per-condenser exclusive_best grouping (by product, not line).
+        let outdoor_product_ids_for_rule: Vec<String> = outdoor_source_ids
+            .iter()
+            .filter(|pid| cart_pids.contains(pid.as_str()))
+            .cloned()
+            .collect();
+
+        // Track outdoor products that have a stackable fixed-amount bundle.
+        if amount > 0.0 && rule.stack_mode.trim() != "exclusive_best" {
+            for pid in &outdoor_product_ids_for_rule {
+                outdoor_pids_with_stackable_fixed.insert(pid.clone());
+            }
+        }
 
         evaluated_rules.push(HvacActiveRule {
             stack_mode,
@@ -854,7 +891,7 @@ fn active_hvac_rules(
             percent_target_qty_by_line: percent_targets,
             fixed_target_qty_by_line: fixed_targets,
             estimated_total_discount,
-            outdoor_line_ids,
+            outdoor_product_ids: outdoor_product_ids_for_rule,
         });
     }
 
@@ -878,26 +915,29 @@ fn active_hvac_rules(
                 .partial_cmp(&a.estimated_total_discount)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        // Keep the best exclusive_best rule *per outdoor condenser*.
-        // Greedy: claim outdoor line IDs as we go; a rule is included if it
-        // covers at least one outdoor line not yet claimed by a better rule.
+        // Keep the best exclusive_best rule *per outdoor condenser model*.
+        // Greedy: claim outdoor product IDs as we go; a rule is included only if
+        // it covers at least one product not yet claimed by a higher-discount rule.
+        // Grouping by product ID (not line ID) ensures that two exclusive_best rules
+        // targeting the same outdoor model compete and only the better one applies,
+        // even when there are multiple cart lines for that model.
         let mut claimed: std::collections::HashSet<String> = std::collections::HashSet::new();
         for rule in exclusive {
-            if rule.outdoor_line_ids.is_empty() {
-                // No outdoor tracking available — include it unconditionally.
+            if rule.outdoor_product_ids.is_empty() {
+                // No product tracking available — include it unconditionally.
                 active.push(rule);
-            } else if rule.outdoor_line_ids.iter().any(|lid| !claimed.contains(lid)) {
-                // At least one outdoor line is unclaimed — this rule wins for its condenser.
-                for lid in &rule.outdoor_line_ids {
-                    claimed.insert(lid.clone());
+            } else if rule.outdoor_product_ids.iter().any(|pid| !claimed.contains(pid)) {
+                // At least one outdoor product is unclaimed — this rule wins for those condensers.
+                for pid in &rule.outdoor_product_ids {
+                    claimed.insert(pid.clone());
                 }
                 active.push(rule);
             }
-            // Otherwise every outdoor line is already covered by a better rule — skip.
+            // Otherwise every outdoor product is already covered by a better rule — skip.
         }
     }
 
-    active
+    (active, outdoor_pids_with_stackable_fixed)
 }
 
 fn allocate_high_value_units(units: &[LineUnit], target_qty: i32) -> (HashMap<String, i32>, f64) {
