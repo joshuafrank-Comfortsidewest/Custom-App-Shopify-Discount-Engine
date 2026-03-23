@@ -707,24 +707,33 @@ fn active_hvac_rules(
         }
     }
 
-    let mut candidate_rules = config.hvac_rule.combination_rules.clone();
+    // Build the set of product IDs actually in this cart (already normalized).
+    // Used to skip rules whose outdoor unit isn't in the cart — the common case.
+    let cart_pids: std::collections::HashSet<&str> =
+        lines_by_product.keys().map(|s| s.as_str()).collect();
 
-    if candidate_rules.is_empty()
-        && !config.hvac_rule.outdoor_product_ids.is_empty()
-        && !config.hvac_rule.indoor_product_ids.is_empty()
-    {
-        candidate_rules.push(HvacCombinationRuleConfig {
-            name: "Default HVAC Rule".to_string(),
-            enabled: true,
-            min_indoor_per_outdoor: config.hvac_rule.min_indoor_per_outdoor,
-            max_indoor_per_outdoor: config.hvac_rule.max_indoor_per_outdoor,
-            indoor_product_ids: config.hvac_rule.indoor_product_ids.clone(),
-            outdoor_product_ids: config.hvac_rule.outdoor_product_ids.clone(),
-            percent_off_hvac_products: config.hvac_rule.percent_off_hvac_products,
-            amount_off_outdoor_per_bundle: config.hvac_rule.amount_off_outdoor_per_bundle,
-            stack_mode: "stackable".to_string(),
-        });
-    }
+    // Use a reference slice to avoid cloning all 35 rules + their String arrays.
+    let default_rule_storage: Vec<HvacCombinationRuleConfig>;
+    let candidate_rules: &[HvacCombinationRuleConfig] =
+        if config.hvac_rule.combination_rules.is_empty()
+            && !config.hvac_rule.outdoor_product_ids.is_empty()
+            && !config.hvac_rule.indoor_product_ids.is_empty()
+        {
+            default_rule_storage = vec![HvacCombinationRuleConfig {
+                name: String::new(),
+                enabled: true,
+                min_indoor_per_outdoor: config.hvac_rule.min_indoor_per_outdoor,
+                max_indoor_per_outdoor: config.hvac_rule.max_indoor_per_outdoor,
+                indoor_product_ids: config.hvac_rule.indoor_product_ids.clone(),
+                outdoor_product_ids: config.hvac_rule.outdoor_product_ids.clone(),
+                percent_off_hvac_products: config.hvac_rule.percent_off_hvac_products,
+                amount_off_outdoor_per_bundle: config.hvac_rule.amount_off_outdoor_per_bundle,
+                stack_mode: "stackable".to_string(),
+            }];
+            &default_rule_storage
+        } else {
+            &config.hvac_rule.combination_rules
+        };
 
     let mut evaluated_rules: Vec<HvacActiveRule> = vec![];
 
@@ -748,25 +757,28 @@ fn active_hvac_rules(
             continue;
         }
 
-        let outdoor_products: std::collections::HashSet<String> = outdoor_source_ids
-            .iter()
-            .map(|pid| normalize_product_id(pid))
-            .collect();
-        let indoor_products: std::collections::HashSet<String> = indoor_source_ids
-            .iter()
-            .map(|pid| normalize_product_id(pid))
-            .collect();
+        // Fast pre-check: skip rules whose outdoor product isn't in this cart.
+        // IDs are already normalized (numeric), so direct &str comparison works.
+        if !outdoor_source_ids.iter().any(|pid| cart_pids.contains(pid.as_str())) {
+            continue;
+        }
+
+        // Use &str sets to avoid String allocations for every product ID.
+        let outdoor_products: std::collections::HashSet<&str> =
+            outdoor_source_ids.iter().map(|s| s.as_str()).collect();
+        let indoor_products: std::collections::HashSet<&str> =
+            indoor_source_ids.iter().map(|s| s.as_str()).collect();
 
         let mut outdoor_line_units: Vec<LineUnit> = vec![];
         let mut indoor_line_units: Vec<LineUnit> = vec![];
 
         for pid in outdoor_products.iter() {
-            if let Some(lines) = lines_by_product.get(pid) {
+            if let Some(lines) = lines_by_product.get(*pid) {
                 outdoor_line_units.extend(lines.iter().cloned());
             }
         }
         for pid in indoor_products.iter() {
-            if let Some(lines) = lines_by_product.get(pid) {
+            if let Some(lines) = lines_by_product.get(*pid) {
                 indoor_line_units.extend(lines.iter().cloned());
             }
         }
