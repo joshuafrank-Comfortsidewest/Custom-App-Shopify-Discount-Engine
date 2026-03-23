@@ -836,12 +836,20 @@ fn active_hvac_rules(
             rule.stack_mode.clone()
         };
 
+        // Only track outdoor units as "fixed" targets when there is an actual amount to apply.
+        // Percent-only rules (amount = 0) must NOT occupy the fixed slot, because:
+        //   1. The exclusive_best killswitch fires when fixed_exclusive_qty > 0, which would
+        //      silently drop any stackable amount rule targeting the same condenser.
+        //   2. outdoor units in fixed_target_qty_by_line are subtracted from remaining_qty,
+        //      preventing the percentage from also applying to the condenser.
+        let fixed_targets = if amount > 0.0 { selected_outdoor_qty_by_line } else { HashMap::new() };
+
         evaluated_rules.push(HvacActiveRule {
             stack_mode,
             percent_off: percent,
             amount_off_outdoor_per_bundle: amount,
             percent_target_qty_by_line: percent_targets,
-            fixed_target_qty_by_line: selected_outdoor_qty_by_line,
+            fixed_target_qty_by_line: fixed_targets,
             estimated_total_discount,
         });
     }
