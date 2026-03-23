@@ -655,6 +655,32 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const errors: string[] = [];
 
+  // 0. Ensure metafield definitions exist so Shopify Functions can read them.
+  //    metafieldsSet creates the VALUE but not the DEFINITION — Functions can only
+  //    read metafields that have a definition. This is idempotent; errors mean it
+  //    already exists and are safe to ignore.
+  await admin.graphql(
+    `#graphql
+    mutation EnsureHvacConfigDefinition($definition: MetafieldDefinitionInput!) {
+      metafieldDefinitionCreate(definition: $definition) {
+        createdDefinition { id }
+        userErrors { field message code }
+      }
+    }`,
+    {
+      variables: {
+        definition: {
+          namespace: "smart_discount_engine",
+          key: "hvac_config",
+          name: "HVAC Config",
+          type: "multi_line_text_field",
+          ownerType: "SHOP",
+          access: { admin: "MERCHANT_READ_WRITE" },
+        },
+      },
+    },
+  ).catch(() => { /* ignore — definition likely already exists */ });
+
   // 1. Save main config + HVAC config to separate shop metafields.
   //    Main config stays < 10KB (Shopify Functions null values above ~10KB).
   //    HVAC combo rules are split into hvac_config metafield, read only when HVAC is enabled.
