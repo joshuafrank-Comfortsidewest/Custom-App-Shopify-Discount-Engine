@@ -235,11 +235,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   // ── Manual map ──
   if (intent === "manual_map") {
-    const mappingId = Number(fd.get("mapping_id"));
+    const sourceSku = String(fd.get("source_sku") ?? "").trim();
     const productId = String(fd.get("product_id") ?? "").trim();
 
-    if (!mappingId || !productId) {
-      return json({ ok: false, message: "Missing mapping ID or product ID." });
+    if (!sourceSku || !productId) {
+      return json({ ok: false, message: "Missing SKU or product ID." });
+    }
+
+    const mapping = await prisma.hvacSkuMapping.findUnique({
+      where: { shop_sourceSku: { shop, sourceSku } },
+    });
+
+    if (!mapping) {
+      return json({ ok: false, message: `SKU not found in database: ${sourceSku}` });
     }
 
     // Look up the product in Shopify
@@ -267,7 +275,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
 
       await prisma.hvacSkuMapping.update({
-        where: { id: mappingId },
+        where: { id: mapping.id },
         data: {
           mappedProductId: product.id,
           mappedProductTitle: product.title,
@@ -279,7 +287,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         },
       });
 
-      return json({ ok: true, message: `Mapped to ${product.title}` });
+      return json({ ok: true, message: `Mapped ${sourceSku} → ${product.title}` });
     } catch (err) {
       return json({
         ok: false,
@@ -316,7 +324,7 @@ export default function HvacMappingRoute() {
 
   const [tabIdx, setTabIdx] = useState(0);
   const [filter, setFilter] = useState("all");
-  const [manualId, setManualId] = useState("");
+  const [manualSku, setManualSku] = useState("");
   const [manualProductId, setManualProductId] = useState("");
 
   const tabs = [
@@ -469,42 +477,97 @@ export default function HvacMappingRoute() {
         )}
 
         {/* ── Manual Map Tab ── */}
-        {tabIdx === 3 && (
-          <Layout.Section>
-            <Card>
+        {tabIdx === 3 && (() => {
+          const needsMapping = (mappings as MappingRow[]).filter(
+            (m) => m.matchStatus === "not_found" || m.matchStatus === "unmapped",
+          );
+          const skuOptions = [
+            { label: "— Select a SKU —", value: "" },
+            ...needsMapping.map((m) => ({
+              label: `${m.sourceSku} (${m.sourceBrand ?? ""} · ${m.sourceSystem ?? ""} · ${m.sourceBtu ?? ""}BTU)`,
+              value: m.sourceSku,
+            })),
+          ];
+          return (
+            <Layout.Section>
               <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">Manual Map</Text>
-                <Text as="p" variant="bodyMd" tone="subdued">
-                  Enter the mapping ID (from the database) and the Shopify Product ID to manually
-                  link a SKU to a product. Use this for SKUs that auto-match didn't find.
-                </Text>
-                <Form method="post">
-                  <input type="hidden" name="intent" value="manual_map" />
-                  <BlockStack gap="300">
-                    <TextField
-                      label="Mapping ID"
-                      type="number"
-                      value={manualId}
-                      onChange={setManualId}
-                      name="mapping_id"
-                      autoComplete="off"
-                    />
-                    <TextField
-                      label="Shopify Product ID (numeric or gid://)"
-                      value={manualProductId}
-                      onChange={setManualProductId}
-                      name="product_id"
-                      autoComplete="off"
-                    />
-                    <Button submit loading={isSubmitting} variant="primary">
-                      Map Product
-                    </Button>
+                <Card>
+                  <BlockStack gap="400">
+                    <Text as="h2" variant="headingMd">Manual Map</Text>
+                    <Text as="p" variant="bodyMd" tone="subdued">
+                      Pick a SKU from the list below (these are SKUs the auto-matcher could not find),
+                      then enter the Shopify Product ID and click Map Product.
+                    </Text>
+                    <Form method="post">
+                      <input type="hidden" name="intent" value="manual_map" />
+                      <input type="hidden" name="source_sku" value={manualSku} />
+                      <BlockStack gap="300">
+                        <Select
+                          label="HVAC SKU (unmapped / not found)"
+                          options={skuOptions}
+                          value={manualSku}
+                          onChange={setManualSku}
+                        />
+                        <TextField
+                          label="Shopify Product ID (numeric or gid://shopify/Product/…)"
+                          value={manualProductId}
+                          onChange={setManualProductId}
+                          name="product_id"
+                          autoComplete="off"
+                          helpText="Find this in Shopify Admin → Products → click the product → copy the ID from the URL"
+                        />
+                        <Button
+                          submit
+                          loading={isSubmitting}
+                          variant="primary"
+                          disabled={!manualSku || !manualProductId}
+                        >
+                          Map Product
+                        </Button>
+                      </BlockStack>
+                    </Form>
                   </BlockStack>
-                </Form>
+                </Card>
+
+                {needsMapping.length > 0 && (
+                  <Card>
+                    <BlockStack gap="300">
+                      <Text as="h2" variant="headingMd">
+                        SKUs needing manual mapping ({needsMapping.length})
+                      </Text>
+                      <DataTable
+                        columnContentTypes={["text", "text", "text", "text", "text", "text"]}
+                        headings={["SKU", "Brand", "System", "BTU", "Refrigerant", "Status"]}
+                        rows={needsMapping.slice(0, 100).map((m) => [
+                          m.sourceSku,
+                          m.sourceBrand ?? "",
+                          m.sourceSystem ?? "",
+                          String(m.sourceBtu ?? ""),
+                          m.sourceRefrigerant ?? "",
+                          statusBadge(m.matchStatus),
+                        ])}
+                        truncate
+                      />
+                      {needsMapping.length > 100 && (
+                        <Text as="p" variant="bodyMd" tone="subdued">
+                          Showing first 100 of {needsMapping.length} entries.
+                        </Text>
+                      )}
+                    </BlockStack>
+                  </Card>
+                )}
+
+                {needsMapping.length === 0 && (
+                  <Card>
+                    <Text as="p" variant="bodyMd" tone="subdued">
+                      All SKUs are mapped. Nothing needs manual mapping right now.
+                    </Text>
+                  </Card>
+                )}
               </BlockStack>
-            </Card>
-          </Layout.Section>
-        )}
+            </Layout.Section>
+          );
+        })()}
       </Layout>
     </Page>
   );
