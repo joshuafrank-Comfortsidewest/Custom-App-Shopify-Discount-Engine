@@ -104,10 +104,52 @@ impl Default for HvacRuleConfig {
     }
 }
 
+// Compact combo rule stored in the hvac_config metafield.
+// Uses short keys and index arrays to stay under Shopify's ~10KB per-metafield limit.
+// oi = indices into global outdoor_product_ids, ii = indices into global indoor_product_ids.
+fn default_true() -> bool { true }
+fn default_min_indoor() -> f64 { 2.0 }
+fn default_max_indoor() -> f64 { 6.0 }
+fn default_stack_mode() -> String { "stackable".to_string() }
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+struct CompactComboRule {
+    n: String,
+    #[serde(default = "default_true")]
+    e: bool,
+    oi: Vec<usize>,
+    ii: Vec<usize>,
+    #[serde(default = "default_min_indoor")]
+    mn: f64,
+    #[serde(default = "default_max_indoor")]
+    mx: f64,
+    p: f64,
+    a: f64,
+    #[serde(default = "default_stack_mode")]
+    s: String,
+}
+
+impl Default for CompactComboRule {
+    fn default() -> Self {
+        Self {
+            n: String::new(),
+            e: true,
+            oi: vec![],
+            ii: vec![],
+            mn: 2.0,
+            mx: 6.0,
+            p: 0.0,
+            a: 0.0,
+            s: "stackable".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 struct HvacConfigOverlay {
-    combination_rules: Vec<HvacCombinationRuleConfig>,
+    combination_rules: Vec<CompactComboRule>,
 }
 
 impl Default for HvacConfigOverlay {
@@ -209,11 +251,30 @@ fn cart_lines_discounts_generate_run(
         .unwrap_or_default();
 
     // HVAC combo rules are stored in a separate metafield to keep main config < 10KB.
-    // Overlay them now if HVAC is enabled.
+    // The compact format uses index arrays (oi/ii) into the global product ID arrays.
+    // Resolve those indices to actual product ID strings before using them.
     if config.toggles.hvac_enabled {
         if let Some(hvac_value) = input.shop().hvac_config().map(|m| m.value()) {
             if let Ok(overlay) = serde_json::from_str::<HvacConfigOverlay>(hvac_value) {
-                config.hvac_rule.combination_rules = overlay.combination_rules;
+                let global_outdoor = config.hvac_rule.outdoor_product_ids.clone();
+                let global_indoor = config.hvac_rule.indoor_product_ids.clone();
+                config.hvac_rule.combination_rules = overlay.combination_rules.iter().map(|r| {
+                    HvacCombinationRuleConfig {
+                        name: r.n.clone(),
+                        enabled: r.e,
+                        outdoor_product_ids: r.oi.iter()
+                            .filter_map(|&i| global_outdoor.get(i).cloned())
+                            .collect(),
+                        indoor_product_ids: r.ii.iter()
+                            .filter_map(|&i| global_indoor.get(i).cloned())
+                            .collect(),
+                        min_indoor_per_outdoor: r.mn,
+                        max_indoor_per_outdoor: r.mx,
+                        percent_off_hvac_products: r.p,
+                        amount_off_outdoor_per_bundle: r.a,
+                        stack_mode: if r.s.is_empty() { "stackable".to_string() } else { r.s.clone() },
+                    }
+                }).collect();
             }
         }
     }

@@ -398,11 +398,43 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   // Merge HVAC combo rules from the separate hvac_config metafield back into config for display.
+  // Supports compact index format (oi/ii) written by the save action, as well as legacy full format.
   if (rawHvacConfigValue) {
     try {
       const hvacOverlay = JSON.parse(rawHvacConfigValue);
       if (Array.isArray(hvacOverlay?.combination_rules)) {
-        config.hvac_rule = { ...config.hvac_rule, combination_rules: hvacOverlay.combination_rules };
+        const globalIndoor = config.hvac_rule.indoor_product_ids;
+        const globalOutdoor = config.hvac_rule.outdoor_product_ids;
+        // Build numeric product ID → SKU reverse-lookup from DB mappings
+        const pidToSku = new Map<string, string>();
+        for (const m of hvacMappings) {
+          if (m.mappedProductId) pidToSku.set(stripGid(m.mappedProductId), m.sourceSku);
+        }
+        config.hvac_rule = {
+          ...config.hvac_rule,
+          combination_rules: hvacOverlay.combination_rules.map((r: any) => {
+            // Compact format uses oi/ii indices; legacy format uses full product ID arrays
+            const oi: string[] = Array.isArray(r.oi)
+              ? r.oi.map((i: number) => globalOutdoor[i]).filter(Boolean)
+              : (r.outdoor_product_ids ?? []);
+            const ii: string[] = Array.isArray(r.ii)
+              ? r.ii.map((i: number) => globalIndoor[i]).filter(Boolean)
+              : (r.indoor_product_ids ?? []);
+            return {
+              name: r.n ?? r.name ?? "",
+              enabled: r.e ?? r.enabled ?? true,
+              outdoor_source_sku: oi[0] ? (pidToSku.get(oi[0]) ?? "") : (r.outdoor_source_sku ?? ""),
+              outdoor_product_ids: oi,
+              indoor_product_ids: ii,
+              allowed_indoor_skus: ii.map((pid: string) => pidToSku.get(pid) ?? "").filter(Boolean),
+              min_indoor_per_outdoor: r.mn ?? r.min_indoor_per_outdoor ?? 2,
+              max_indoor_per_outdoor: r.mx ?? r.max_indoor_per_outdoor ?? 6,
+              percent_off_hvac_products: r.p ?? r.percent_off_hvac_products ?? 0,
+              amount_off_outdoor_per_bundle: r.a ?? r.amount_off_outdoor_per_bundle ?? 0,
+              stack_mode: r.s ?? r.stack_mode ?? "stackable",
+            };
+          }),
+        };
       }
     } catch { /* ignore parse errors */ }
   }
@@ -628,9 +660,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   // Split HVAC combo rules into a separate shop metafield to keep main config < 10KB.
   // Shopify Functions null metafield values larger than ~10KB in their input.
+  // Use compact index-based format: oi/ii are indices into the global outdoor/indoor arrays
+  // instead of full product ID strings, cutting the payload from ~20KB to ~4KB.
   const { combination_rules: hvacComboRules, ...hvacRuleWithoutCombos } = fullConfig.hvac_rule;
   const mainConfig = { ...fullConfig, hvac_rule: { ...hvacRuleWithoutCombos, combination_rules: [] } };
-  const hvacConfigPayload = { combination_rules: hvacComboRules };
+
+  const globalIndoor = hvacRuleWithoutCombos.indoor_product_ids;
+  const globalOutdoor = hvacRuleWithoutCombos.outdoor_product_ids;
+  const compactRules = hvacComboRules.map((rule) => ({
+    n: rule.name,
+    e: rule.enabled,
+    oi: rule.outdoor_product_ids.map((id) => globalOutdoor.indexOf(id)).filter((i) => i >= 0),
+    ii: rule.indoor_product_ids.map((id) => globalIndoor.indexOf(id)).filter((i) => i >= 0),
+    mn: rule.min_indoor_per_outdoor,
+    mx: rule.max_indoor_per_outdoor,
+    p: rule.percent_off_hvac_products,
+    a: rule.amount_off_outdoor_per_bundle,
+    s: rule.stack_mode,
+  }));
+  const hvacConfigPayload = { combination_rules: compactRules };
 
   const serializedConfig = JSON.stringify(mainConfig);
   const serializedHvacConfig = JSON.stringify(hvacConfigPayload);
