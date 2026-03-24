@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useActionData, useLoaderData, useNavigation, useSubmit } from "@remix-run/react";
+import { Form, useActionData, useLoaderData, useNavigation, useSubmit } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -382,13 +382,13 @@ export default function AutoTaggingRoute() {
                     autoComplete="off"
                     placeholder={"SKU-001\nSKU-002\nSKU-003"}
                   />
-                  <form method="post">
+                  <Form method="post">
                     <input type="hidden" name="intent" value="match_skus" />
                     <input type="hidden" name="skus" value={skuInput} />
                     <Button submit loading={isSubmitting} variant="primary">
                       Match SKUs to Products
                     </Button>
-                  </form>
+                  </Form>
                 </BlockStack>
               </Card>
 
@@ -490,7 +490,7 @@ export default function AutoTaggingRoute() {
                     <Text as="h2" variant="headingMd">
                       Recent Jobs
                     </Text>
-                    <form method="post">
+                    <Form method="post">
                       <input type="hidden" name="intent" value="clear_jobs" />
                       <Button
                         submit
@@ -500,7 +500,7 @@ export default function AutoTaggingRoute() {
                       >
                         Clear History
                       </Button>
-                    </form>
+                    </Form>
                   </InlineStack>
 
                   {(jobs as JobRow[]).length === 0 ? (
