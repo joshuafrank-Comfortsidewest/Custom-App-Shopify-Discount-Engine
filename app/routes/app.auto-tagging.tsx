@@ -128,52 +128,64 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       try {
         // Strip multipliers from the input to get the bare core SKU for searching
         const coreSku = stripMultiplier(sku);
-        const res = await admin.graphql(
-          `
-          #graphql
-          query FindBySku($query: String!) {
-            products(first: 10, query: $query) {
-              nodes {
-                id
-                title
-                tags
-                variants(first: 20) {
-                  nodes { id sku }
-                }
-              }
-            }
-          }`,
-          // Shopify uses substring matching on sku: so this will also find
-          // compound SKU fields like "BRV-R12W-115VI + BRV-R12LS-115VO"
-          { variables: { query: `sku:${coreSku}` } },
-        );
-        const data = await res.json();
-        const products = data?.data?.products?.nodes ?? [];
+        let foundAnything = false;
+        let cursor: string | null = null;
+        const MAX_PAGES = 10; // safety cap: up to 2,500 products per SKU
 
-        let found = false;
-        for (const product of products) {
-          for (const variant of product.variants?.nodes ?? []) {
-            // Parse the variant's SKU field: may be compound ("A + B") and/or
-            // have multipliers ("3X A + B"). Extract all bare core SKUs.
-            const cores = variantCoreSkus(variant.sku || "");
-            if (cores.includes(coreSku)) {
-              // Avoid duplicates
-              if (!matched.find((m) => m.id === product.id)) {
-                matched.push({
-                  id: product.id,
-                  title: product.title,
-                  sku: variant.sku,
-                  tags: product.tags ?? [],
-                });
+        // Paginate through all matching products (Shopify max 250 per page)
+        for (let page = 0; page < MAX_PAGES; page++) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const res: any = await admin.graphql(
+            `
+            #graphql
+            query FindBySku($query: String!, $after: String) {
+              products(first: 250, query: $query, after: $after) {
+                nodes {
+                  id
+                  title
+                  tags
+                  variants(first: 20) {
+                    nodes { id sku }
+                  }
+                }
+                pageInfo { hasNextPage endCursor }
               }
-              found = true;
-              break;
+            }`,
+            // Shopify uses substring matching on sku: so this finds
+            // compound SKU fields like "OS-MSR36-230VO + 2x OS-M09SRW-230VI"
+            { variables: { query: `sku:${coreSku}`, after: cursor } },
+          );
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const data: any = await res.json();
+          const nodes: any[] = data?.data?.products?.nodes ?? [];
+          const pageInfo: { hasNextPage: boolean; endCursor: string } | undefined =
+            data?.data?.products?.pageInfo;
+
+          for (const product of nodes) {
+            for (const variant of product.variants?.nodes ?? []) {
+              // Parse variant's SKU field: may be compound ("A + B") and/or
+              // have multipliers ("3X A + B"). Extract all bare core SKUs.
+              const cores = variantCoreSkus(variant.sku || "");
+              if (cores.includes(coreSku)) {
+                foundAnything = true;
+                if (!matched.find((m) => m.id === product.id)) {
+                  matched.push({
+                    id: product.id,
+                    title: product.title,
+                    sku: variant.sku,
+                    tags: product.tags ?? [],
+                  });
+                }
+                break; // found the matching variant for this product; move on
+              }
             }
           }
-          if (found) break;
+
+          if (!pageInfo?.hasNextPage) break;
+          cursor = pageInfo.endCursor;
         }
 
-        if (!found) notFound.push(sku);
+        if (!foundAnything) notFound.push(sku);
       } catch {
         notFound.push(sku);
       }
@@ -451,9 +463,12 @@ export default function AutoTaggingRoute() {
               {matchedProducts.length > 0 && (
                 <Card>
                   <BlockStack gap="300">
-                    <Text as="h2" variant="headingMd">
-                      Step 2: Review Matches ({matchedProducts.length} found)
-                    </Text>
+                    <InlineStack align="space-between" blockAlign="center">
+                      <Text as="h2" variant="headingMd">
+                        Step 2: Review Matches
+                      </Text>
+                      <Badge tone="success">{matchedProducts.length} products found</Badge>
+                    </InlineStack>
                     {notFoundSkus.length > 0 && (
                       <Banner tone="warning">
                         <Text as="p" variant="bodyMd">
@@ -464,16 +479,16 @@ export default function AutoTaggingRoute() {
                     <DataTable
                       columnContentTypes={["text", "text", "text"]}
                       headings={["Product", "SKU", "Current Tags"]}
-                      rows={matchedProducts.slice(0, 50).map((p) => [
+                      rows={matchedProducts.slice(0, 20).map((p) => [
                         p.title,
                         p.sku,
                         p.tags.length > 0 ? p.tags.join(", ") : "—",
                       ])}
                       truncate
                     />
-                    {matchedProducts.length > 50 && (
+                    {matchedProducts.length > 20 && (
                       <Text as="p" variant="bodyMd" tone="subdued">
-                        Showing 50 of {matchedProducts.length} products.
+                        Showing first 20 of {matchedProducts.length} matched products. All {matchedProducts.length} will be tagged in Step 3.
                       </Text>
                     )}
                   </BlockStack>
