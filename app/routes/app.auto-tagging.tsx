@@ -248,112 +248,120 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
     });
 
-    // Process tagging
-    let changedCount = 0;
-    let skippedProtected = 0;
-    const changes: Array<{ id: string; title: string; action: string }> = [];
-    const errors: string[] = [];
+    // ── Fire-and-forget: process in background so the page can be left ──
+    // Node.js keeps running this after the HTTP response is sent.
+    (async () => {
+      let changedCount = 0;
+      let skippedProtected = 0;
+      const changes: Array<{ id: string; title: string; action: string }> = [];
+      const errors: string[] = [];
 
-    for (let i = 0; i < products.length; i++) {
-      const product = products[i];
+      for (let i = 0; i < products.length; i++) {
+        const product = products[i];
 
-      // Skip protected HVAC products
-      if (protectedIds.has(product.id)) {
-        skippedProtected++;
-        continue;
-      }
+        // Skip protected HVAC products
+        if (protectedIds.has(product.id)) {
+          skippedProtected++;
+          continue;
+        }
 
-      try {
-        if (mode === "tag") {
-          // If the tag being added is a discount tag ("X off"), first remove any
-          // other existing discount tags so there's never two "X off" tags at once.
-          if (DISCOUNT_TAG_RE.test(tag)) {
-            const conflicting = product.tags.filter(
-              (t: string) =>
-                DISCOUNT_TAG_RE.test(t) &&
-                t.toLowerCase() !== tag.toLowerCase(),
-            );
-            if (conflicting.length > 0) {
+        try {
+          if (mode === "tag") {
+            // Remove any conflicting "X off" tags before adding the new one
+            if (DISCOUNT_TAG_RE.test(tag)) {
+              const conflicting = product.tags.filter(
+                (t: string) =>
+                  DISCOUNT_TAG_RE.test(t) &&
+                  t.toLowerCase() !== tag.toLowerCase(),
+              );
+              if (conflicting.length > 0) {
+                await admin.graphql(
+                  `#graphql
+                  mutation TagsRemove($id: ID!, $tags: [String!]!) {
+                    tagsRemove(id: $id, tags: $tags) {
+                      userErrors { field message }
+                    }
+                  }`,
+                  { variables: { id: product.id, tags: conflicting } },
+                );
+                // Respect Shopify rate limit between calls
+                await new Promise((r) => setTimeout(r, 300));
+              }
+            }
+            // Add tag
+            if (!product.tags.includes(tag)) {
               await admin.graphql(
-                `
-                #graphql
+                `#graphql
+                mutation TagsAdd($id: ID!, $tags: [String!]!) {
+                  tagsAdd(id: $id, tags: $tags) {
+                    userErrors { field message }
+                  }
+                }`,
+                { variables: { id: product.id, tags: [tag] } },
+              );
+              changedCount++;
+              changes.push({ id: product.id, title: product.title, action: `added "${tag}"` });
+            }
+          } else {
+            // Remove tag
+            if (product.tags.includes(tag)) {
+              await admin.graphql(
+                `#graphql
                 mutation TagsRemove($id: ID!, $tags: [String!]!) {
                   tagsRemove(id: $id, tags: $tags) {
                     userErrors { field message }
                   }
                 }`,
-                { variables: { id: product.id, tags: conflicting } },
+                { variables: { id: product.id, tags: [tag] } },
               );
+              changedCount++;
+              changes.push({ id: product.id, title: product.title, action: `removed "${tag}"` });
             }
           }
-          // Add tag
-          if (!product.tags.includes(tag)) {
-            await admin.graphql(
-              `
-              #graphql
-              mutation TagsAdd($id: ID!, $tags: [String!]!) {
-                tagsAdd(id: $id, tags: $tags) {
-                  userErrors { field message }
-                }
-              }`,
-              { variables: { id: product.id, tags: [tag] } },
-            );
-            changedCount++;
-            changes.push({ id: product.id, title: product.title, action: `added "${tag}"` });
-          }
-        } else {
-          // Remove tag
-          if (product.tags.includes(tag)) {
-            await admin.graphql(
-              `
-              #graphql
-              mutation TagsRemove($id: ID!, $tags: [String!]!) {
-                tagsRemove(id: $id, tags: $tags) {
-                  userErrors { field message }
-                }
-              }`,
-              { variables: { id: product.id, tags: [tag] } },
-            );
-            changedCount++;
-            changes.push({ id: product.id, title: product.title, action: `removed "${tag}"` });
-          }
+        } catch (err) {
+          errors.push(
+            `${product.title}: ${err instanceof Error ? err.message : "unknown error"}`,
+          );
         }
-      } catch (err) {
-        errors.push(
-          `${product.title}: ${err instanceof Error ? err.message : "unknown error"}`,
-        );
+
+        // Rate-limit friendly: ~3 products/sec (Shopify allows ~5 calls/sec)
+        await new Promise((r) => setTimeout(r, 350));
+
+        // Persist progress every 10 products so History tab stays current
+        if (i % 10 === 0 || i === products.length - 1) {
+          await prisma.autoTagJob.update({
+            where: { id: job.id },
+            data: {
+              processedCount: i + 1,
+              changedCount,
+              skippedProtectedCount: skippedProtected,
+              changesJson: JSON.stringify(changes),
+              errorsJson: JSON.stringify(errors),
+            },
+          }).catch(() => {});
+        }
       }
 
-      // Update progress
+      // Mark complete
       await prisma.autoTagJob.update({
         where: { id: job.id },
         data: {
-          processedCount: i + 1,
+          status: "completed",
+          processedCount: products.length,
           changedCount,
           skippedProtectedCount: skippedProtected,
           changesJson: JSON.stringify(changes),
           errorsJson: JSON.stringify(errors),
         },
-      });
-    }
+      }).catch(() => {});
+    })().catch(console.error);
 
-    // Mark complete
-    await prisma.autoTagJob.update({
-      where: { id: job.id },
-      data: {
-        status: errors.length > 0 ? "completed" : "completed",
-        processedCount: products.length,
-        changedCount,
-        skippedProtectedCount: skippedProtected,
-        changesJson: JSON.stringify(changes),
-        errorsJson: JSON.stringify(errors),
-      },
-    });
-
+    // Return immediately — job runs in the background
     return json({
       ok: true,
       intent,
-      message: `${mode === "tag" ? "Tagged" : "Untagged"} ${changedCount} products with "${tag}". ${skippedProtected} HVAC-protected skipped. ${errors.length} errors.`,
+      jobId: job.id,
+      message: `Job started: ${products.length} products queued. You can leave this page — check Job History for progress.`,
     });
   }
 
