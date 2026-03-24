@@ -7,10 +7,25 @@
         "discountClasses": ["SHIPPING"]
       },
       "cart": {
+        "cost": {
+          "subtotalAmount": {
+            "amount": "350.00"
+          }
+        },
         "deliveryGroups": [
-           {
-             "id": "gid://shopify/CartDeliveryGroup/1"
-           }
+          {
+            "id": "gid://shopify/CartDeliveryGroup/1",
+            "deliveryOptions": [
+              {
+                "handle": "lift-gate-handle",
+                "title": "Delivery with Lift Gate"
+              },
+              {
+                "handle": "same-day-handle",
+                "title": "Same Business Day Shipment"
+              }
+            ]
+          }
         ]
       }
     },
@@ -24,8 +39,8 @@
                 "message": "FREE DELIVERY",
                 "targets": [
                   {
-                    "deliveryGroup": {
-                      "id": "gid://shopify/CartDeliveryGroup/1"
+                    "deliveryOption": {
+                      "handle": "lift-gate-handle"
                     }
                   }
                 ],

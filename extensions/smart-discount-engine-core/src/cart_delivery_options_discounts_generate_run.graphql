@@ -1,7 +1,16 @@
 query Input {
   cart {
+    cost {
+      subtotalAmount {
+        amount
+      }
+    }
     deliveryGroups {
       id
+      deliveryOptions {
+        handle
+        title
+      }
     }
   }
   discount {
