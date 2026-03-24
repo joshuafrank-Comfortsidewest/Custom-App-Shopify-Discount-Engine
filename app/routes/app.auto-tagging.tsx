@@ -130,10 +130,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const coreSku = stripMultiplier(sku);
         let foundAnything = false;
         let cursor: string | null = null;
-        const MAX_PAGES = 10; // safety cap: up to 2,500 products per SKU
+        let hasMore = true;
 
-        // Paginate through all matching products (Shopify max 250 per page)
-        for (let page = 0; page < MAX_PAGES; page++) {
+        // Paginate through ALL matching products (Shopify max 250 per page)
+        while (hasMore) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const res: any = await admin.graphql(
             `
@@ -181,8 +181,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             }
           }
 
-          if (!pageInfo?.hasNextPage) break;
-          cursor = pageInfo.endCursor;
+          hasMore = pageInfo?.hasNextPage ?? false;
+          cursor = pageInfo?.endCursor ?? null;
         }
 
         if (!foundAnything) notFound.push(sku);
