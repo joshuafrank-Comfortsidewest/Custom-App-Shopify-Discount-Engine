@@ -23,6 +23,34 @@ import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
+// ── SKU helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * Strip leading/trailing quantity multipliers such as:
+ *   3X SKU  |  SKU 3X  |  x3 SKU  |  SKU x3  (case-insensitive, any number)
+ * Returns the bare SKU in UPPER CASE.
+ */
+function stripMultiplier(raw: string): string {
+  let s = raw.trim().toUpperCase();
+  s = s.replace(/^(\d+X|X\d+)\s+/, "");  // prefix: "3X " or "X3 "
+  s = s.replace(/\s+(\d+X|X\d+)$/, "");  // suffix: " 3X" or " X3"
+  return s.trim();
+}
+
+/**
+ * A Shopify variant's SKU field may contain multiple SKUs joined by " + ".
+ * Returns all core (multiplier-stripped, uppercased) SKUs from the field.
+ */
+function variantCoreSkus(skuField: string): string[] {
+  return skuField
+    .split("+")
+    .map((p) => stripMultiplier(p))
+    .filter(Boolean);
+}
+
+/** Pattern for discount tags like "5 off", "10.51 off" */
+const DISCOUNT_TAG_RE = /^(\d+(?:\.\d+)?)\s+off$/i;
+
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 type JobRow = {
@@ -98,11 +126,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     for (const sku of skus) {
       try {
+        // Strip multipliers from the input to get the bare core SKU for searching
+        const coreSku = stripMultiplier(sku);
         const res = await admin.graphql(
           `
           #graphql
           query FindBySku($query: String!) {
-            products(first: 5, query: $query) {
+            products(first: 10, query: $query) {
               nodes {
                 id
                 title
@@ -113,7 +143,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               }
             }
           }`,
-          { variables: { query: `sku:${sku}` } },
+          // Shopify uses substring matching on sku: so this will also find
+          // compound SKU fields like "BRV-R12W-115VI + BRV-R12LS-115VO"
+          { variables: { query: `sku:${coreSku}` } },
         );
         const data = await res.json();
         const products = data?.data?.products?.nodes ?? [];
@@ -121,8 +153,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         let found = false;
         for (const product of products) {
           for (const variant of product.variants?.nodes ?? []) {
-            const vSku = (variant.sku || "").trim().toUpperCase();
-            if (vSku === sku.toUpperCase()) {
+            // Parse the variant's SKU field: may be compound ("A + B") and/or
+            // have multipliers ("3X A + B"). Extract all bare core SKUs.
+            const cores = variantCoreSkus(variant.sku || "");
+            if (cores.includes(coreSku)) {
               // Avoid duplicates
               if (!matched.find((m) => m.id === product.id)) {
                 matched.push({
@@ -219,6 +253,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       try {
         if (mode === "tag") {
+          // If the tag being added is a discount tag ("X off"), first remove any
+          // other existing discount tags so there's never two "X off" tags at once.
+          if (DISCOUNT_TAG_RE.test(tag)) {
+            const conflicting = product.tags.filter(
+              (t: string) =>
+                DISCOUNT_TAG_RE.test(t) &&
+                t.toLowerCase() !== tag.toLowerCase(),
+            );
+            if (conflicting.length > 0) {
+              await admin.graphql(
+                `
+                #graphql
+                mutation TagsRemove($id: ID!, $tags: [String!]!) {
+                  tagsRemove(id: $id, tags: $tags) {
+                    userErrors { field message }
+                  }
+                }`,
+                { variables: { id: product.id, tags: conflicting } },
+              );
+            }
+          }
           // Add tag
           if (!product.tags.includes(tag)) {
             await admin.graphql(
