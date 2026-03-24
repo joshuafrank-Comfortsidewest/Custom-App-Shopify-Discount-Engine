@@ -51,21 +51,21 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
 
-  const jobs = await prisma.autoTagJob.findMany({
-    where: { shop },
-    orderBy: { createdAt: "desc" },
-    take: 20,
-  });
+  const jobs = await prisma.autoTagJob
+    .findMany({ where: { shop }, orderBy: { createdAt: "desc" }, take: 20 })
+    .catch(() => []);
 
   // Get HVAC-mapped product IDs (protected from discount tagging)
-  const hvacMapped = await prisma.hvacSkuMapping.findMany({
-    where: {
-      shop,
-      mappedProductId: { not: null },
-      matchStatus: { in: ["auto_exact", "manual"] },
-    },
-    select: { mappedProductId: true },
-  });
+  const hvacMapped = await prisma.hvacSkuMapping
+    .findMany({
+      where: {
+        shop,
+        mappedProductId: { not: null },
+        matchStatus: { in: ["auto_exact", "manual"] },
+      },
+      select: { mappedProductId: true },
+    })
+    .catch(() => []);
   const protectedProductIds = hvacMapped
     .map((m) => m.mappedProductId)
     .filter(Boolean) as string[];
