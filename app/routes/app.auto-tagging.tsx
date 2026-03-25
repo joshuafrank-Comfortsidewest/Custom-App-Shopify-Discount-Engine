@@ -48,6 +48,31 @@ function variantCoreSkus(skuField: string): string[] {
     .filter(Boolean);
 }
 
+/**
+ * Normalize a single SKU component for exact matching — keeps the multiplier
+ * value but canonicalizes its position to a "NxCORE" prefix form.
+ *   "2X SKU-A"  →  "2XSKU-A"
+ *   "SKU-A 2X"  →  "2XSKU-A"
+ *   "X2 SKU-A"  →  "2XSKU-A"
+ *   "SKU-A"     →  "SKU-A"   (no multiplier)
+ */
+function normalizeComponentExact(raw: string): string {
+  let s = raw.trim().toUpperCase();
+  // prefix: "3X SKU" or "X3 SKU"
+  let m = s.match(/^(\d+X|X\d+)\s+(.+)$/);
+  if (m) {
+    const num = m[1].replace(/X/g, "");
+    return `${num}X${m[2].trim()}`;
+  }
+  // suffix: "SKU 3X" or "SKU X3"
+  m = s.match(/^(.+)\s+(\d+X|X\d+)$/);
+  if (m) {
+    const num = m[2].replace(/X/g, "");
+    return `${num}X${m[1].trim()}`;
+  }
+  return s;
+}
+
 /** Pattern for discount tags like "5 off", "10.51 off" */
 const DISCOUNT_TAG_RE = /^(\d+(?:\.\d+)?)\s+off$/i;
 
@@ -112,6 +137,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // ── Match SKUs to products ──
   if (intent === "match_skus") {
     const rawSkus = String(fd.get("skus") ?? "");
+    // "component" = strip multipliers, find any product containing those core SKUs
+    // "exact"     = keep multipliers, order-insensitive exact set match
+    const searchMode = fd.get("searchMode") === "exact" ? "exact" : "component";
     const skus = rawSkus
       .split(/[\n,]+/)
       .map((s) => s.trim())
@@ -124,65 +152,128 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const matched: MatchedProduct[] = [];
     const notFound: string[] = [];
 
+    // Reusable GraphQL search: paginates all products matching a single SKU term
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async function searchBySku(searchTerm: string, onVariant: (product: any, variant: any) => boolean) {
+      let cursor: string | null = null;
+      let hasMore = true;
+      while (hasMore) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const res: any = await admin.graphql(
+          `
+          #graphql
+          query FindBySku($query: String!, $after: String) {
+            products(first: 250, query: $query, after: $after) {
+              nodes {
+                id
+                title
+                tags
+                variants(first: 20) {
+                  nodes { id sku }
+                }
+              }
+              pageInfo { hasNextPage endCursor }
+            }
+          }`,
+          { variables: { query: `sku:${searchTerm}`, after: cursor } },
+        );
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const data: any = await res.json();
+        const nodes: any[] = data?.data?.products?.nodes ?? [];
+        const pageInfo: { hasNextPage: boolean; endCursor: string } | undefined =
+          data?.data?.products?.pageInfo;
+
+        for (const product of nodes) {
+          for (const variant of product.variants?.nodes ?? []) {
+            if (onVariant(product, variant)) break;
+          }
+        }
+
+        hasMore = pageInfo?.hasNextPage ?? false;
+        cursor = pageInfo?.endCursor ?? null;
+      }
+    }
+
     for (const sku of skus) {
       try {
-        // Strip multipliers from the input to get the bare core SKU for searching
-        const coreSku = stripMultiplier(sku);
+        const isCompound = sku.includes("+");
         let foundAnything = false;
-        let cursor: string | null = null;
-        let hasMore = true;
 
-        // Paginate through ALL matching products (Shopify max 250 per page)
-        while (hasMore) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const res: any = await admin.graphql(
-            `
-            #graphql
-            query FindBySku($query: String!, $after: String) {
-              products(first: 250, query: $query, after: $after) {
-                nodes {
-                  id
-                  title
-                  tags
-                  variants(first: 20) {
-                    nodes { id sku }
-                  }
-                }
-                pageInfo { hasNextPage endCursor }
-              }
-            }`,
-            // Shopify uses substring matching on sku: so this finds
-            // compound SKU fields like "OS-MSR36-230VO + 2x OS-M09SRW-230VI"
-            { variables: { query: `sku:${coreSku}`, after: cursor } },
-          );
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const data: any = await res.json();
-          const nodes: any[] = data?.data?.products?.nodes ?? [];
-          const pageInfo: { hasNextPage: boolean; endCursor: string } | undefined =
-            data?.data?.products?.pageInfo;
+        if (searchMode === "exact") {
+          // ── Exact mode ──────────────────────────────────────────────────────
+          // Keep multiplier values; only order is ignored.
+          // "2X SKU-A + SKU-B" matches "SKU-B + 2X SKU-A" but NOT "SKU-A + SKU-B"
+          const inputNormalized = sku
+            .split("+")
+            .map((p) => normalizeComponentExact(p))
+            .filter(Boolean)
+            .sort();
 
-          for (const product of nodes) {
-            for (const variant of product.variants?.nodes ?? []) {
-              // Parse variant's SKU field: may be compound ("A + B") and/or
-              // have multipliers ("3X A + B"). Extract all bare core SKUs.
-              const cores = variantCoreSkus(variant.sku || "");
-              if (cores.includes(coreSku)) {
-                foundAnything = true;
-                if (!matched.find((m) => m.id === product.id)) {
-                  matched.push({
-                    id: product.id,
-                    title: product.title,
-                    sku: variant.sku,
-                    tags: product.tags ?? [],
-                  });
-                }
-                break; // found the matching variant for this product; move on
+          if (inputNormalized.length === 0) { notFound.push(sku); continue; }
+
+          // Strip multiplier only for the Shopify query term (to find candidates)
+          const searchTerm = stripMultiplier(sku.split("+")[0]);
+          await searchBySku(searchTerm, (product, variant) => {
+            const variantNormalized = (variant.sku || "")
+              .split("+")
+              .map((p: string) => normalizeComponentExact(p))
+              .filter(Boolean)
+              .sort();
+            const isMatch =
+              variantNormalized.length === inputNormalized.length &&
+              variantNormalized.every((c: string, i: number) => c === inputNormalized[i]);
+            if (isMatch) {
+              foundAnything = true;
+              if (!matched.find((m) => m.id === product.id)) {
+                matched.push({ id: product.id, title: product.title, sku: variant.sku, tags: product.tags ?? [] });
               }
+              return true;
             }
-          }
+            return false;
+          });
 
-          hasMore = pageInfo?.hasNextPage ?? false;
-          cursor = pageInfo?.endCursor ?? null;
+        } else if (isCompound) {
+          // ── Component mode, compound input ───────────────────────────────────
+          // Strip multipliers; match any product whose variant contains exactly
+          // this set of core SKUs (order-insensitive).
+          const inputCores = sku
+            .split("+")
+            .map((p) => stripMultiplier(p))
+            .filter(Boolean)
+            .sort();
+
+          if (inputCores.length === 0) { notFound.push(sku); continue; }
+
+          await searchBySku(inputCores[0], (product, variant) => {
+            const variantCores = variantCoreSkus(variant.sku || "").sort();
+            const isMatch =
+              variantCores.length === inputCores.length &&
+              variantCores.every((c, i) => c === inputCores[i]);
+            if (isMatch) {
+              foundAnything = true;
+              if (!matched.find((m) => m.id === product.id)) {
+                matched.push({ id: product.id, title: product.title, sku: variant.sku, tags: product.tags ?? [] });
+              }
+              return true;
+            }
+            return false;
+          });
+
+        } else {
+          // ── Component mode, single SKU ───────────────────────────────────────
+          // Strip multiplier; find any product containing that core SKU as a component.
+          const coreSku = stripMultiplier(sku);
+          await searchBySku(coreSku, (product, variant) => {
+            const cores = variantCoreSkus(variant.sku || "");
+            if (cores.includes(coreSku)) {
+              foundAnything = true;
+              if (!matched.find((m) => m.id === product.id)) {
+                matched.push({ id: product.id, title: product.title, sku: variant.sku, tags: product.tags ?? [] });
+              }
+              return true;
+            }
+            return false;
+          });
         }
 
         if (!foundAnything) notFound.push(sku);
@@ -396,6 +487,7 @@ export default function AutoTaggingRoute() {
   const [skuInput, setSkuInput] = useState("");
   const [tagName, setTagName] = useState("");
   const [tagMode, setTagMode] = useState("tag");
+  const [searchMode, setSearchMode] = useState("component");
 
   // Matched products from the match step
   const matchedProducts: MatchedProduct[] =
@@ -455,11 +547,21 @@ export default function AutoTaggingRoute() {
                     onChange={setSkuInput}
                     multiline={6}
                     autoComplete="off"
-                    placeholder={"SKU-001\nSKU-002\nSKU-003"}
+                    placeholder={"SKU-001\nSKU-002\n2X SKU-003 + SKU-004"}
+                  />
+                  <Select
+                    label="Search Mode"
+                    options={[
+                      { label: "Component Search — find all products containing this SKU (multiplier ignored)", value: "component" },
+                      { label: "Exact SKU Match — match this exact SKU with multiplier, any order", value: "exact" },
+                    ]}
+                    value={searchMode}
+                    onChange={setSearchMode}
                   />
                   <Form method="post">
                     <input type="hidden" name="intent" value="match_skus" />
                     <input type="hidden" name="skus" value={skuInput} />
+                    <input type="hidden" name="searchMode" value={searchMode} />
                     <Button submit loading={isSubmitting} variant="primary">
                       Match SKUs to Products
                     </Button>
