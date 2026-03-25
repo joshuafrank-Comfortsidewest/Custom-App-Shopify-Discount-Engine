@@ -289,6 +289,23 @@ const condenserValidBtus = (() => {
   return map;
 })();
 
+// Build a lookup: condenser SKU (uppercase) → max number of zones (indoor heads) it supports.
+// Derived from the "Number of Zones" field in the combinations table.
+const condenserMaxZones = (() => {
+  const map = new Map<string, number>();
+  const combinations = (unitsData as any).combinations as CombinationEntry[];
+  for (const combo of combinations ?? []) {
+    const condenserKey = String(combo.Condenser ?? "").trim().toUpperCase();
+    if (!condenserKey) continue;
+    const zones = parseInt(String(combo["Number of Zones"] ?? "0"), 10);
+    if (!isNaN(zones) && zones > 0) {
+      const current = map.get(condenserKey) ?? 0;
+      if (zones > current) map.set(condenserKey, zones);
+    }
+  }
+  return map;
+})();
+
 // Build a lookup: indoor SKU (uppercase) → ALL possible BTU values.
 // Dip-switch units appear multiple times with the same SKU but different BTUs
 // (e.g. "6000", "9000", "12000", or comma-separated "6000, 9000, 12000").
@@ -1453,6 +1470,15 @@ export default function DiscountConfigRoute() {
                       const compatibleIndoorMappings = getCompatibleIndoorMappings(
                         rule.outdoor_source_sku,
                       );
+                      const sortedCompatibleIndoorMappings = [...compatibleIndoorMappings].sort(
+                        (a, b) => {
+                          const sys = (a.sourceSystem ?? "").localeCompare(b.sourceSystem ?? "");
+                          if (sys !== 0) return sys;
+                          const series = (a.sourceSeries ?? "").localeCompare(b.sourceSeries ?? "");
+                          if (series !== 0) return series;
+                          return (a.sourceBtu ?? 0) - (b.sourceBtu ?? 0);
+                        },
+                      );
                       const compatibleIndoorSkus = compatibleIndoorMappings.map((m) => m.sourceSku);
                       const selectedIndoorCount = rule.allowed_indoor_skus.filter((sku) =>
                         compatibleIndoorSkus.includes(sku),
@@ -1516,12 +1542,16 @@ export default function DiscountConfigRoute() {
                                   const allowedPool = getCompatibleIndoorMappings(v).map(
                                     (m) => m.sourceSku,
                                   );
+                                  const maxZones = condenserMaxZones.get(normalizeCompare(v));
                                   return {
                                     ...r,
                                     outdoor_source_sku: v,
                                     allowed_indoor_skus: r.allowed_indoor_skus.filter((sku) =>
                                       allowedPool.includes(sku),
                                     ),
+                                    ...(maxZones !== undefined
+                                      ? { max_indoor_per_outdoor: String(maxZones) }
+                                      : {}),
                                   };
                                 }),
                               )
@@ -1576,7 +1606,7 @@ export default function DiscountConfigRoute() {
                                   No indoor mappings match this condenser brand + refrigerant.
                                 </Text>
                               )}
-                              {compatibleIndoorMappings.map((m) => (
+                              {sortedCompatibleIndoorMappings.map((m) => (
                                 <Checkbox
                                   key={m.sourceSku}
                                   label={[m.sourceBrand, m.sourceSeries, m.sourceSystem, m.sourceBtu ? `${m.sourceBtu} BTU` : null, m.sourceRefrigerant].filter(Boolean).join(" - ")}
