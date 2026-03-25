@@ -1031,6 +1031,16 @@ export default function DiscountConfigRoute() {
     })),
   );
 
+  // HVAC rule import/export
+  const [showImportExport, setShowImportExport] = useState(false);
+  const [importJson, setImportJson] = useState("");
+  const [importPreview, setImportPreview] = useState<{
+    toAdd: CombinationRuleState[];
+    skipped: Array<{ sku: string; reason: string }>;
+    indoorDropped: number;
+  } | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+
   // Collection spend rule
   const [spendCollection, setSpendCollection] = useState(config.collection_spend_rule.collection_id);
   const [spendAmtPerStep, setSpendAmtPerStep] = useState(
@@ -1068,6 +1078,90 @@ export default function DiscountConfigRoute() {
       isIndoorCompatibleWithOutdoor(indoor, outdoor),
     );
   };
+
+  const parseImportJson = () => {
+    setImportError(null);
+    setImportPreview(null);
+    let raw: any;
+    try {
+      raw = JSON.parse(importJson.trim());
+    } catch {
+      setImportError("Invalid JSON — could not parse.");
+      return;
+    }
+    let rawRules: any[];
+    if (Array.isArray(raw)) {
+      rawRules = raw;
+    } else if (Array.isArray(raw?.combination_rules)) {
+      rawRules = raw.combination_rules;
+    } else if (Array.isArray(raw?.hvac_rule?.combination_rules)) {
+      rawRules = raw.hvac_rule.combination_rules;
+    } else {
+      setImportError(
+        "No combination_rules found. Paste an exported combination_rules array, the hvac_rule object, or a full config.",
+      );
+      return;
+    }
+    const outdoorSkuSet = new Set(outdoorMappingEntries.map((m) => normalizeCompare(m.sourceSku)));
+    const indoorSkuSet = new Set(indoorMappingEntries.map((m) => normalizeCompare(m.sourceSku)));
+    const toAdd: CombinationRuleState[] = [];
+    const skipped: Array<{ sku: string; reason: string }> = [];
+    let indoorDropped = 0;
+    for (const r of rawRules) {
+      const outdoorSku = String(r.outdoor_source_sku ?? "").trim();
+      if (!outdoorSku) {
+        skipped.push({ sku: "(unknown)", reason: "missing outdoor_source_sku — compact format not supported, use the Export button to get importable JSON" });
+        continue;
+      }
+      if (!outdoorSkuSet.has(normalizeCompare(outdoorSku))) {
+        skipped.push({ sku: outdoorSku, reason: "condenser SKU not mapped in this store" });
+        continue;
+      }
+      const rawIndoorSkus: string[] = Array.isArray(r.allowed_indoor_skus) ? r.allowed_indoor_skus : [];
+      const filteredIndoorSkus = rawIndoorSkus.filter((sku) =>
+        indoorSkuSet.has(normalizeCompare(sku)),
+      );
+      indoorDropped += rawIndoorSkus.length - filteredIndoorSkus.length;
+      toAdd.push({
+        name: String(r.name ?? `Rule ${toAdd.length + 1}`),
+        enabled: r.enabled !== false,
+        outdoor_source_sku: outdoorSku,
+        allowed_indoor_skus: filteredIndoorSkus,
+        min_indoor_per_outdoor: String(r.min_indoor_per_outdoor ?? 2),
+        max_indoor_per_outdoor: String(r.max_indoor_per_outdoor ?? 6),
+        percent_off_hvac_products: String(r.percent_off_hvac_products ?? 0),
+        amount_off_outdoor_per_bundle: String(r.amount_off_outdoor_per_bundle ?? 0),
+        stack_mode:
+          String(r.stack_mode ?? "").trim() === "exclusive_best" ? "exclusive_best" : "stackable",
+      });
+    }
+    setImportPreview({ toAdd, skipped, indoorDropped });
+  };
+
+  const applyImport = () => {
+    if (!importPreview) return;
+    setComboRules((prev) => [...prev, ...importPreview.toAdd]);
+    setShowImportExport(false);
+    setImportJson("");
+    setImportPreview(null);
+    setImportError(null);
+  };
+
+  const exportJson = JSON.stringify(
+    comboRules.map((r) => ({
+      name: r.name,
+      enabled: r.enabled,
+      outdoor_source_sku: r.outdoor_source_sku,
+      allowed_indoor_skus: r.allowed_indoor_skus,
+      min_indoor_per_outdoor: Number(r.min_indoor_per_outdoor) || 2,
+      max_indoor_per_outdoor: Number(r.max_indoor_per_outdoor) || 6,
+      percent_off_hvac_products: Number(r.percent_off_hvac_products) || 0,
+      amount_off_outdoor_per_bundle: Number(r.amount_off_outdoor_per_bundle) || 0,
+      stack_mode: r.stack_mode,
+    })),
+    null,
+    2,
+  );
 
   const collectionOptions = [
     { label: "— Select collection —", value: "" },
@@ -1440,9 +1534,21 @@ export default function DiscountConfigRoute() {
                       <Text as="h3" variant="headingSm">
                         Per-Condenser Combination Rules
                       </Text>
-                      <Button
-                        onClick={() =>
-                          setComboRules((prev) => [
+                      <InlineStack gap="200">
+                        <Button
+                          variant="plain"
+                          onClick={() => {
+                            setShowImportExport((v) => !v);
+                            setImportPreview(null);
+                            setImportError(null);
+                            setImportJson("");
+                          }}
+                        >
+                          {showImportExport ? "Close Import/Export" : "Import / Export"}
+                        </Button>
+                        <Button
+                          onClick={() =>
+                            setComboRules((prev) => [
                             ...prev,
                             {
                               name: `Rule ${prev.length + 1}`,
@@ -1460,11 +1566,105 @@ export default function DiscountConfigRoute() {
                       >
                         + Add Combination Rule
                       </Button>
+                      </InlineStack>
                     </InlineStack>
                     <Text as="p" variant="bodyMd" tone="subdued">
                       Customize which indoor heads are allowed per outdoor condenser. Each rule defines
                       a specific condenser and its permitted indoor units with custom discount settings.
                     </Text>
+
+                    {/* Import / Export panel */}
+                    {showImportExport && (
+                      <Card>
+                        <BlockStack gap="400">
+                          <BlockStack gap="200">
+                            <Text as="h4" variant="headingSm">Export Current Rules</Text>
+                            <Text as="p" variant="bodySm" tone="subdued">
+                              Copy this JSON and paste it into another store to import these rules.
+                            </Text>
+                            <TextField
+                              label="Export JSON"
+                              labelHidden
+                              value={exportJson}
+                              onChange={() => {}}
+                              multiline={6}
+                              autoComplete="off"
+                            />
+                          </BlockStack>
+                          <Divider />
+                          <BlockStack gap="200">
+                            <Text as="h4" variant="headingSm">Import Rules from Another Store</Text>
+                            <Text as="p" variant="bodySm" tone="subdued">
+                              Paste exported JSON below. Rules whose condenser SKU is not mapped in
+                              this store will be skipped. Indoor SKUs that are not mapped will be
+                              omitted from the rule. Imported rules are appended to any existing rules.
+                            </Text>
+                            <TextField
+                              label="Paste JSON"
+                              labelHidden
+                              value={importJson}
+                              onChange={(v) => {
+                                setImportJson(v);
+                                setImportPreview(null);
+                                setImportError(null);
+                              }}
+                              multiline={6}
+                              autoComplete="off"
+                              placeholder="Paste combination_rules JSON here…"
+                            />
+                            {importError && (
+                              <Banner tone="critical">{importError}</Banner>
+                            )}
+                            {importPreview && (
+                              <BlockStack gap="200">
+                                <Banner
+                                  tone={importPreview.toAdd.length > 0 ? "success" : "warning"}
+                                  title="Import Preview"
+                                >
+                                  <List type="bullet">
+                                    <List.Item>
+                                      {importPreview.toAdd.length} rule{importPreview.toAdd.length !== 1 ? "s" : ""} ready to import
+                                    </List.Item>
+                                    {importPreview.skipped.length > 0 && (
+                                      <List.Item>
+                                        {importPreview.skipped.length} rule{importPreview.skipped.length !== 1 ? "s" : ""} skipped — condenser not mapped in this store
+                                      </List.Item>
+                                    )}
+                                    {importPreview.indoorDropped > 0 && (
+                                      <List.Item>
+                                        {importPreview.indoorDropped} indoor SKU{importPreview.indoorDropped !== 1 ? "s" : ""} dropped — not mapped in this store
+                                      </List.Item>
+                                    )}
+                                  </List>
+                                </Banner>
+                                {importPreview.skipped.length > 0 && (
+                                  <BlockStack gap="100">
+                                    {importPreview.skipped.map((s, i) => (
+                                      <Text key={i} as="p" variant="bodySm" tone="subdued">
+                                        Skipped: {s.sku} — {s.reason}
+                                      </Text>
+                                    ))}
+                                  </BlockStack>
+                                )}
+                              </BlockStack>
+                            )}
+                            <InlineStack gap="200">
+                              <Button
+                                onClick={parseImportJson}
+                                disabled={!importJson.trim()}
+                              >
+                                Preview Import
+                              </Button>
+                              {importPreview && importPreview.toAdd.length > 0 && (
+                                <Button variant="primary" onClick={applyImport}>
+                                  Apply ({importPreview.toAdd.length} rule{importPreview.toAdd.length !== 1 ? "s" : ""})
+                                </Button>
+                              )}
+                            </InlineStack>
+                          </BlockStack>
+                        </BlockStack>
+                      </Card>
+                    )}
 
                     {comboRules.map((rule, idx) => {
                       const compatibleIndoorMappings = getCompatibleIndoorMappings(
