@@ -1,6 +1,10 @@
 import { useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import {
+  json,
+  unstable_createMemoryUploadHandler,
+  unstable_parseMultipartFormData,
+} from "@remix-run/node";
 import { Form, useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import {
   Page,
@@ -90,7 +94,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const shop = session.shop;
-  const fd = await request.formData();
+
+  const contentType = request.headers.get("content-type") ?? "";
+  let fd: FormData;
+  if (contentType.includes("multipart/form-data")) {
+    const uploadHandler = unstable_createMemoryUploadHandler({ maxPartSize: 10_000_000 });
+    fd = await unstable_parseMultipartFormData(request, uploadHandler);
+  } else {
+    fd = await request.formData();
+  }
+
   const intent = String(fd.get("intent") ?? "");
 
   // ── Import from units.json ──
@@ -145,6 +158,75 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     return json({ ok: true, message: `Imported ${done} unique SKUs from catalog.` });
+  }
+
+  // ── Import from uploaded JSON file ──
+  if (intent === "import_from_file") {
+    const file = fd.get("catalog_file") as File | null;
+    if (!file || file.size === 0) {
+      return json({ ok: false, message: "No file provided. Please select a JSON file to upload." });
+    }
+
+    let uploadedUnits: UnitEntry[];
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      // Accept either { indoorMapping: [...] } or a raw array
+      uploadedUnits = Array.isArray(parsed) ? parsed : (parsed.indoorMapping ?? []);
+      if (!Array.isArray(uploadedUnits) || uploadedUnits.length === 0) {
+        return json({ ok: false, message: "File parsed but contained no units. Expected { indoorMapping: [...] } or a JSON array." });
+      }
+    } catch {
+      return json({ ok: false, message: "Invalid JSON file. Please upload a valid units.json." });
+    }
+
+    const seenSkus = new Set<string>();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ops: any[] = [];
+
+    for (const unit of uploadedUnits) {
+      const sku = (unit.SKU || "").trim();
+      if (!sku || seenSkus.has(sku)) continue;
+      seenSkus.add(sku);
+
+      const sourceType = classifySystem(unit.System);
+      const btuRaw = String(unit.BTU ?? "").split(",")[0].trim();
+      const sourceBtu = btuRaw ? parseInt(btuRaw, 10) || null : null;
+
+      ops.push(
+        prisma.hvacSkuMapping.upsert({
+          where: { shop_sourceSku: { shop, sourceSku: sku } },
+          create: {
+            shop,
+            sourceSku: sku,
+            sourceType,
+            sourceBrand: unit.Brand || null,
+            sourceSeries: unit.Series || null,
+            sourceSystem: unit.System || null,
+            sourceBtu,
+            sourceRefrigerant: unit.Refrigerant || null,
+            matchStatus: "unmapped",
+          },
+          update: {
+            sourceType,
+            sourceBrand: unit.Brand || null,
+            sourceSeries: unit.Series || null,
+            sourceSystem: unit.System || null,
+            sourceBtu,
+            sourceRefrigerant: unit.Refrigerant || null,
+          },
+        }),
+      );
+    }
+
+    const BATCH = 100;
+    let done = 0;
+    for (let i = 0; i < ops.length; i += BATCH) {
+      await prisma.$transaction(ops.slice(i, i + BATCH));
+      done += Math.min(BATCH, ops.length - i);
+    }
+
+    return json({ ok: true, message: `Imported ${done} unique SKUs from uploaded file.` });
   }
 
   // ── Auto-match SKUs to Shopify products ──
@@ -407,14 +489,35 @@ export default function HvacMappingRoute() {
                 <BlockStack gap="300">
                   <Text as="h2" variant="headingMd">Actions</Text>
                   <Text as="p" variant="bodyMd" tone="subdued">
-                    Step 1: Import the HVAC catalog from units.json into the database.
+                    Step 1: Upload your store's units.json catalog file, or import the built-in catalog.
                     Step 2: Auto-match SKUs to your Shopify products.
                   </Text>
+
+                  <Form method="post" encType="multipart/form-data">
+                    <input type="hidden" name="intent" value="import_from_file" />
+                    <BlockStack gap="200">
+                      <Text as="p" variant="bodyMd" fontWeight="semibold">Upload your units.json</Text>
+                      <input
+                        type="file"
+                        name="catalog_file"
+                        accept=".json,application/json"
+                        style={{ marginBottom: "8px" }}
+                      />
+                      <div>
+                        <Button submit loading={isSubmitting} variant="primary">
+                          Import from Uploaded File
+                        </Button>
+                      </div>
+                    </BlockStack>
+                  </Form>
+
+                  <Divider />
+
                   <InlineStack gap="300" wrap>
                     <Form method="post">
                       <input type="hidden" name="intent" value="import_catalog" />
-                      <Button submit loading={isSubmitting} variant="primary">
-                        Import Catalog from units.json
+                      <Button submit loading={isSubmitting} variant="plain">
+                        Import Built-in Catalog (units.json)
                       </Button>
                     </Form>
                     <Form method="post">
@@ -430,6 +533,7 @@ export default function HvacMappingRoute() {
                       </Button>
                     </Form>
                   </InlineStack>
+
                   <Divider />
                   <Form method="post">
                     <input type="hidden" name="intent" value="clear_all" />
