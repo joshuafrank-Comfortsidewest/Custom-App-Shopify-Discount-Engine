@@ -207,8 +207,20 @@ async function fetchCollections(admin: any): Promise<CollectionOption[]> {
   return data?.data?.collections?.nodes ?? [];
 }
 
+function normalizeCollectionId(id: string): string {
+  const trimmed = id.trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("gid://")) return trimmed;
+  // Numeric ID only — convert to GID
+  if (/^\d+$/.test(trimmed)) return `gid://shopify/Collection/${trimmed}`;
+  return trimmed;
+}
+
 async function fetchAllProductIds(admin: any, collectionId: string): Promise<string[]> {
-  if (!collectionId) return [];
+  const gid = normalizeCollectionId(collectionId);
+  if (!gid) return [];
+  // reassign for use below
+  collectionId = gid;
   const ids: string[] = [];
   let after: string | null = null;
   while (true) {
@@ -1306,12 +1318,20 @@ export default function DiscountConfigRoute() {
                             Remove
                           </Button>
                         </InlineStack>
-                        <Select
-                          label="Collection"
-                          options={collectionOptions}
+                        <TextField
+                          label="Collection ID"
                           value={rule.collection_id}
                           onChange={(v) =>
                             setRules((p) => p.map((r, j) => (j === i ? { ...r, collection_id: v } : r)))
+                          }
+                          autoComplete="off"
+                          placeholder="Paste numeric ID or gid://shopify/Collection/…"
+                          helpText={
+                            rule.collection_id
+                              ? (collections as CollectionOption[]).find(
+                                  (c) => c.id === normalizeCollectionId(rule.collection_id),
+                                )?.title ?? "Collection name not in preloaded list — ID will still work on save"
+                              : "Shopify Admin → Collections → click collection → copy number from URL"
                           }
                         />
                         <TextField
@@ -1686,11 +1706,19 @@ export default function DiscountConfigRoute() {
                       Customers earn a stepped discount by spending on products from this collection.
                       Each spend step grants a fixed dollar amount off. Product IDs are fetched on save.
                     </Text>
-                    <Select
-                      label="Collection"
-                      options={collectionOptions}
+                    <TextField
+                      label="Collection ID"
                       value={spendCollection}
                       onChange={setSpendCollection}
+                      autoComplete="off"
+                      placeholder="Paste numeric ID or gid://shopify/Collection/…"
+                      helpText={
+                        spendCollection
+                          ? (collections as CollectionOption[]).find(
+                              (c) => c.id === normalizeCollectionId(spendCollection),
+                            )?.title ?? "Collection name not in preloaded list — ID will still work on save"
+                          : "Shopify Admin → Collections → click collection → copy number from URL"
+                      }
                     />
                     <FormLayout>
                       <FormLayout.Group>
