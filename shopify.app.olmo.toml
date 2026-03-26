@@ -1,9 +1,9 @@
-# Config for Bravo store app
-# Replace BRAVO_APP_CLIENT_ID with the actual client_id from your Shopify Dev Dashboard
+# Config for Olmo store app
+# Replace OLMO_APP_CLIENT_ID with the actual client_id from your Shopify Dev Dashboard
 
-client_id = "4c6cc05a57e7ca90d12790b8f131da86"
+client_id = "OLMO_APP_CLIENT_ID"
 name = "Smart Discount Engine 2"
-application_url = "https://custom-app-shopify-discount-engine-bravo.onrender.com"
+application_url = "https://custom-app-shopify-discount-engine-olmo.onrender.com"
 embedded = true
 
 [build]
@@ -27,13 +27,13 @@ use_legacy_install_flow = false
 
 [auth]
 redirect_urls = [
-  "https://custom-app-shopify-discount-engine-bravo.onrender.com/auth/callback"
+  "https://custom-app-shopify-discount-engine-olmo.onrender.com/auth/callback"
 ]
 
 [app_proxy]
-url = "https://custom-app-shopify-discount-engine-bravo.onrender.com/proxy"
+url = "https://custom-app-shopify-discount-engine-olmo.onrender.com/proxy"
 subpath = "discount-progress"
 prefix = "apps"
 
 [app_preferences]
-url = "https://custom-app-shopify-discount-engine-bravo.onrender.com/app"
+url = "https://custom-app-shopify-discount-engine-olmo.onrender.com/app"
