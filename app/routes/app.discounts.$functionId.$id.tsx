@@ -2180,40 +2180,6 @@ export default function DiscountConfigRoute() {
                     </List>
                   </BlockStack>
                 </Card>
-
-                {/* Deployment Instructions */}
-                <Card>
-                  <BlockStack gap="300">
-                    <Text as="h3" variant="headingSm">
-                      Deployment Checklist
-                    </Text>
-                    <Banner tone="info" title="Important: Two deployments are needed">
-                      <List type="number">
-                        <List.Item>
-                          <strong>Render (auto)</strong>: Push to GitHub — the admin UI auto-deploys to Render.
-                        </List.Item>
-                        <List.Item>
-                          <strong>Shopify Function (manual)</strong>: Run <code>shopify app deploy</code> from
-                          your terminal to compile and upload the Rust WASM checkout function to Shopify.
-                          Without this, the function on Shopify still uses the old code.
-                        </List.Item>
-                        <List.Item>
-                          <strong>Save Config</strong>: After deploying, click Save Config here to write
-                          the latest settings to shop metafields.
-                        </List.Item>
-                        <List.Item>
-                          <strong>Active Discount</strong>: Ensure there is an active automatic discount
-                          in Shopify Admin &gt; Discounts using &quot;Smart Discount Engine 2&quot;.
-                        </List.Item>
-                      </List>
-                    </Banner>
-                    <Text as="p" variant="bodyMd" tone="subdued">
-                      The bulk discount currently compares cart subtotal ($) against the tier thresholds.
-                      For bulk to trigger, the customer needs a cart subtotal of at least ${diagnostics.keyValues.bulk5_min}.
-                      First-order and VIP require logged-in customers.
-                    </Text>
-                  </BlockStack>
-                </Card>
               </BlockStack>
             </Layout.Section>
           )}
